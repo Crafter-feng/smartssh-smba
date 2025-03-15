@@ -69,3 +69,29 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 - Initial release
+
+## [X.X.X] - 2023-XX-XX
+
+### 变更
+
+- **配置结构变更**：所有全局配置现在整合到 `smartssh-smba.config` 下，包括：
+  - `serverList` - 服务器列表
+  - `customCommands` - 全局自定义命令
+  - `showHostsInPickLists` - 是否在选择列表中显示主机名
+  - `enableLocalCommands` - 是否启用本地命令
+- 本地命令（工作区特定）仍保留在 `smartssh-smba.localCommands` 下
+- 增强了日志输出，帮助调试配置加载和变更
+- 简化了配置加载机制，移除了对 filewatcher 的依赖
+- 添加了更多的错误处理，使代码更加健壮
+
+### 修复
+
+- 修复了配置变更后不能正确刷新的问题
+- 修复了多个终端连接时的命令执行问题
+- 修复了本地命令加载的问题
+
+## [旧版本号] - 旧日期
+
+### 变更
+
+- 旧版本的变更内容

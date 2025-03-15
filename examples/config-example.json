@@ -1,0 +1,64 @@
+{
+  "smartssh-smba.config": {
+    "serverList": [
+      {
+        "name": "开发服务器",
+        "host": "dev.example.com",
+        "port": 22,
+        "username": "developer",
+        "privateKey": "C:\\Users\\user\\.ssh\\id_rsa",
+        "path": "/var/www/html",
+        "customCommands": [
+          "cd /var/www/html",
+          "ls -la"
+        ],
+        "smbMapping": {
+          "localPath": "Z:\\Projects",
+          "remotePath": "/var/www/html"
+        }
+      },
+      {
+        "name": "测试服务器",
+        "host": "test.example.com",
+        "port": 22,
+        "username": "tester",
+        "password": "password123",
+        "path": "/home/tester/projects",
+        "customCommands": [
+          "echo '已连接到测试服务器'"
+        ]
+      }
+    ],
+    "showHostsInPickLists": false,
+    "customCommands": [
+      {
+        "name": "列出文件",
+        "command": "ls -la",
+        "description": "列出当前目录下的所有文件和文件夹"
+      },
+      {
+        "name": "查看项目状态",
+        "command": "git status",
+        "description": "查看 Git 仓库状态"
+      },
+      {
+        "name": "构建项目",
+        "command": "npm run build",
+        "description": "构建当前项目"
+      }
+    ],
+    "enableLocalCommands": true
+  },
+  "smartssh-smba.localCommands": [
+    {
+      "name": "启动开发服务器",
+      "command": "npm run dev",
+      "description": "启动开发服务器"
+    },
+    {
+      "name": "运行测试",
+      "command": "npm test",
+      "description": "运行项目测试"
+    }
+  ]
+} 

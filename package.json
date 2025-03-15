@@ -1,9 +1,9 @@
 {
-  "name": "smartssh",
-  "displayName": "SmartSSH",
-  "description": "Extension for SSH connections using the ftp-simple settings",
-  "version": "0.0.0",
-  "publisher": "smartssh",
+  "name": "smartssh-smba",
+  "displayName": "SmartSSH-SMBA",
+  "description": "SSH连接扩展，支持SMB路径映射自动切换目录",
+  "version": "1.0.0",
+  "publisher": "crafter-feng",
   "license": "MIT",
   "engines": {
     "vscode": "^1.10.0"
@@ -13,143 +13,378 @@
   ],
   "keywords": [
     "ssh",
-    "remote"
+    "remote",
+    "smb",
+    "path-mapping"
   ],
   "icon": "icon.png",
   "galleryBanner": {
     "color": "#DDCC99",
     "theme": "light"
   },
-  "activationEvents": [
-    "onCommand:smartssh.openConnection",
-    "onCommand:smartssh.portForwarding",
-    "*"
-  ],
   "main": "./extension",
   "contributes": {
     "commands": [
       {
-        "command": "smartssh.openConnection",
-        "title": "Open SSH Connection",
-        "category": "SmartSSH"
+        "command": "smartssh-smba.openConnection",
+        "title": "打开SSH连接",
+        "category": "SmartSSH-SMBA"
       },
       {
-        "command": "smartssh.portForwarding",
-        "title": "SSH Port Forwarding",
-        "category": "SmartSSH"
+        "command": "smartssh-smba.openSettings",
+        "title": "打开设置",
+        "icon": "$(settings-gear)",
+        "category": "SmartSSH-SMBA"
+      },
+      {
+        "command": "smartssh-smba.refreshServers",
+        "title": "刷新服务器列表",
+        "icon": "$(refresh)",
+        "category": "SmartSSH-SMBA"
+      },
+      {
+        "command": "smartssh-smba.refreshCommands",
+        "title": "刷新命令列表",
+        "icon": "$(refresh)",
+        "category": "SmartSSH-SMBA"
+      },
+      {
+        "command": "smartssh-smba.addServer",
+        "title": "添加服务器",
+        "icon": "$(add)",
+        "category": "SmartSSH-SMBA"
+      },
+      {
+        "command": "smartssh-smba.connectToServer",
+        "title": "连接",
+        "icon": "$(plug)",
+        "category": "SmartSSH-SMBA"
+      },
+      {
+        "command": "smartssh-smba.sendCommand",
+        "title": "发送",
+        "icon": "$(play)",
+        "category": "SmartSSH-SMBA"
+      },
+      {
+        "command": "smartssh-smba.addCommand",
+        "title": "添加命令",
+        "icon": "$(add)",
+        "category": "SmartSSH-SMBA"
+      },
+      {
+        "command": "smartssh-smba.editCommand",
+        "title": "编辑",
+        "icon": "$(edit)",
+        "category": "SmartSSH-SMBA"
+      },
+      {
+        "command": "smartssh-smba.deleteCommand",
+        "title": "删除",
+        "icon": "$(trash)",
+        "category": "SmartSSH-SMBA"
+      },
+      {
+        "command": "smartssh-smba.createLocalCommands",
+        "title": "配置本地命令",
+        "icon": "$(settings-gear)",
+        "category": "SmartSSH-SMBA"
+      },
+      {
+        "command": "smartssh-smba.deleteLocalCommand",
+        "title": "删除本地命令",
+        "icon": "$(trash)",
+        "category": "SmartSSH-SMBA"
+      },
+      {
+        "command": "smartssh-smba.openServerSettings",
+        "title": "打开服务器设置",
+        "icon": "$(settings-gear)",
+        "category": "SmartSSH-SMBA"
+      },
+      {
+        "command": "smartssh-smba.fastOpenConnection",
+        "title": "快速打开SSH连接",
+        "category": "SmartSSH-SMBA"
+      },
+      {
+        "command": "smartssh-smba.editServer",
+        "title": "编辑",
+        "icon": "$(edit)",
+        "category": "SmartSSH-SMBA"
+      },
+      {
+        "command": "smartssh-smba.deleteServer",
+        "title": "删除",
+        "icon": "$(trash)",
+        "category": "SmartSSH-SMBA"
+      },
+      {
+        "command": "smartssh-smba.openLocalCommandsSettings",
+        "title": "打开本地命令设置",
+        "icon": "$(settings-gear)",
+        "category": "SmartSSH-SMBA"
       }
     ],
     "configuration": {
       "type": "object",
-      "title": "SmartSSH configuration",
+      "title": "SmartSSH-SMBA",
       "properties": {
-        "smartssh.customCommands": {
-          "type": [
-            "array"
-          ],
-          "items": {
-            "type": "string"
+        "smartssh-smba.config": {
+          "type": "object",
+          "default": {
+            "showHostsInPickLists": false,
+            "serverList": [],
+            "customCommands": []
           },
-          "default": [],
-          "description": "Specifies custom commands which will execute on session start"
+          "description": "SmartSSH-SMBA 的所有配置",
+          "properties": {
+            "showHostsInPickLists": {
+              "type": "boolean",
+              "default": false,
+              "description": "在选择列表中显示主机名"
+            },
+            "serverList": {
+              "type": "array",
+              "default": [],
+              "description": "SSH服务器列表",
+              "items": {
+                "type": "object",
+                "required": ["name", "host", "username"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "服务器显示名称"
+                  },
+                  "host": {
+                    "type": "string",
+                    "description": "主机名或IP地址"
+                  },
+                  "username": {
+                    "type": "string",
+                    "description": "SSH用户名"
+                  },
+                  "password": {
+                    "type": "string",
+                    "description": "SSH密码（不推荐，建议使用私钥）"
+                  },
+                  "port": {
+                    "type": "number",
+                    "default": 22,
+                    "description": "SSH端口"
+                  },
+                  "privateKey": {
+                    "type": "string",
+                    "description": "私钥文件路径"
+                  },
+                  "agent": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "使用SSH代理进行认证"
+                  },
+                  "initCommands": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "连接后自动执行的命令"
+                  },
+                  "smbMapping": {
+                    "type": "object",
+                    "properties": {
+                      "localPath": {
+                        "type": "string",
+                        "description": "本地路径"
+                      },
+                      "remotePath": {
+                        "type": "string",
+                        "description": "远程路径"
+                      }
+                    },
+                    "description": "SMB路径映射配置"
+                  },
+                  "customCommands": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "服务器特定的自定义命令"
+                  }
+                }
+              }
+            },
+            "customCommands": {
+              "type": "array",
+              "default": [],
+              "items": {
+                "type": "object",
+                "required": ["name", "command"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "命令显示名称"
+                  },
+                  "command": {
+                    "type": "string",
+                    "description": "要执行的命令"
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "命令描述"
+                  },
+                  "icon": {
+                    "type": "string",
+                    "description": "命令图标（使用 VS Code 内置图标名称）"
+                  }
+                }
+              },
+              "description": "全局自定义命令列表"
+            },
+            "enableLocalCommands": {
+              "type": "boolean",
+              "default": true,
+              "description": "是否启用本地命令功能（从工作区加载命令）"
+            }
+          }
         },
-        "smartssh.recentlyUsedForwardings": {
-          "type": [
-            "array"
-          ],
-          "items": {
-            "type": "string"
-          },
-          "default": [],
-          "description": "In this place stored all saved port forwarding args"
-        },
-        "smartssh.openProjectCatalog": {
-          "type": "boolean",
-          "default": false,
-          "description": "Open the project directory from the ftp-simple config, if it exists, after starting the SSH session"
-        },
-        "smartssh.allowMultipleConnections": {
-          "type": "boolean",
-          "default": false,
-          "description": "Allow you open few connections for one server at the same time"
-        },
-        "smartssh.showHostsInPickLists": {
-          "type": "boolean",
-          "default": false,
-          "description": "Show usernames and hosthames in pick lists instead on server names"
-        },
-        "smartssh.serverList": {
+        "smartssh-smba.localCommands": {
           "type": "array",
+          "default": [],
           "items": {
             "type": "object",
+            "required": ["name", "command"],
             "properties": {
               "name": {
                 "type": "string",
-                "description": "Name of server",
-                "required": true
+                "description": "命令显示名称"
               },
-              "username": {
+              "command": {
                 "type": "string",
-                "description": "Username for authentication",
-                "required": true
+                "description": "要执行的命令"
               },
-              "password": {
+              "description": {
                 "type": "string",
-                "description": "Password for authentication",
-                "required": false
-              },
-              "host": {
+                "description": "命令描述"
+              },"icon": {
                 "type": "string",
-                "description": "Server hostname",
-                "required": true
-              },
-              "port": {
-                "type": "integer",
-                "description": "SSH port",
-                "default": 22
-              },
-              "privateKey": {
-                "type": "string",
-                "description": "String that contains a path to private key",
-                "required": false
-              },
-              "project": {
-                "type": "object",
-                "description": "Specify local workspace path and server root path",
-                "examples": {
-                  "D:/projects/project": "/home/user/project",
-                  "D:/projects/yet_another_project": "/home/user/yet_another_project"
-                }
-              },
-              "path": {
-                "type": "string",
-                "description": "Path on server for `cd` command after session start (not required)",
-                "required": false
-              },
-              "customCommands": {
-                "type": [
-                  "array"
-                ],
-                "items": {
-                  "type": "string"
-                },
-                "default": [],
-                "description": "Specifies custom commands which will execute on session start"
+                "description": "命令图标（使用 VS Code 内置图标名称）"
               }
             }
           },
-          "default": [],
-          "description": "You can describe servers config here"
+          "description": "本地命令列表，特定于当前工作区"
         }
       }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "smartssh-explorer",
+          "title": "SmartSSH-SMBA",
+          "icon": "resources/server.svg"
+        }
+      ]
+    },
+    "views": {
+      "smartssh-explorer": [
+        {
+          "id": "smartssh-smba-servers",
+          "name": "服务器列表"
+        },
+        {
+          "id": "smartssh-smba-commands",
+          "name": "扩展命令"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "smartssh-smba.refreshServers",
+          "when": "view == smartssh-smba-servers",
+          "group": "navigation"
+        },
+        {
+          "command": "smartssh-smba.addServer",
+          "when": "view == smartssh-smba-servers",
+          "group": "navigation"
+        },
+        {
+          "command": "smartssh-smba.openServerSettings",
+          "when": "view == smartssh-smba-servers",
+          "group": "navigation"
+        },
+        {
+          "command": "smartssh-smba.refreshCommands",
+          "when": "view == smartssh-smba-commands",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "smartssh-smba.connectToServer",
+          "when": "view == smartssh-smba-servers && viewItem == server",
+          "group": "inline"
+        },
+        {
+          "command": "smartssh-smba.editServer",
+          "when": "view == smartssh-smba-servers && viewItem == server",
+          "group": "inline"
+        },
+        {
+          "command": "smartssh-smba.deleteServer",
+          "when": "view == smartssh-smba-servers && viewItem == server",
+          "group": "inline"
+        },
+        {
+          "command": "smartssh-smba.addCommand",
+          "when": "view == smartssh-smba-commands && viewItem == global-commands-group",
+          "group": "inline@1"
+        },
+        {
+          "command": "smartssh-smba.openSettings",
+          "when": "view == smartssh-smba-commands && viewItem == global-commands-group",
+          "group": "inline@2"
+        },
+        {
+          "command": "smartssh-smba.addCommand",
+          "arguments": [true],
+          "when": "view == smartssh-smba-commands && viewItem == local-commands-group",
+          "group": "inline@1"
+        },
+        {
+          "command": "smartssh-smba.openLocalCommandsSettings",
+          "when": "view == smartssh-smba-commands && viewItem == local-commands-group",
+          "group": "inline@2"
+        },
+        {
+          "command": "smartssh-smba.sendCommand",
+          "when": "view == smartssh-smba-commands && viewItem =~ /-command$/ || view == smartssh-smba-servers && viewItem == serverCommand",
+          "group": "inline"
+        },
+        {
+          "command": "smartssh-smba.editCommand",
+          "when": "view == smartssh-smba-commands && viewItem =~ /Command$/",
+          "group": "inline"
+        },
+        {
+          "command": "smartssh-smba.deleteCommand",
+          "when": "view == smartssh-smba-commands && viewItem =~ /Command$/",
+          "group": "inline"
+        },
+        {
+          "command": "smartssh-smba.deleteLocalCommand",
+          "when": "view == smartssh-smba-commands && viewItem == local-command",
+          "group": "inline"
+        }
+      ]
     }
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/fast-facts/smartssh.git"
+    "url": "https://github.com/Crafter-feng/smartssh-smba.git"
   },
   "bugs": {
-    "url": "https://github.com/fast-facts/smartssh/issues"
+    "url": "https://github.com/Crafter-feng/smartssh-smba/issues"
   },
   "scripts": {
     "lint": "eslint --fix"
@@ -169,5 +404,9 @@
     "mocha": "^11.1.0",
     "semantic-release-vsce": "^6.0.6",
     "typescript": "^5.8.2"
-  }
+  },
+  "activationEvents": [
+    "onStartupFinished",
+    "*"
+  ]
 }
