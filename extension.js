@@ -4,9 +4,9 @@ const vscode = require('vscode');
 const commandExistsSync = require('command-exists').sync;
 const configLoader = require('./adapters/config-loader');
 const { ServerTreeProvider, CommandTreeProvider } = require('./src/serverTreeProvider');
+const { logger, LogLevel, LogTarget } = require('./adapters/logger');
 
 // 全局变量
-let outputChannel = null;
 let fastOpenConnectionButton = null;
 let servers = [];
 let terminals = [];
@@ -47,7 +47,7 @@ function activate(context) {
     updateStatusBarButton();
 
     // 记录日志
-    outputChannel.appendLine('[SmartSSH-SMBA] 扩展已激活');
+    logger.info('扩展已激活');
 
     // 加载服务器列表
     loadServerList();
@@ -62,7 +62,7 @@ function activate(context) {
       },
     };
   } catch (error) {
-    console.error('激活扩展时出错:', error);
+    logger.error('激活扩展时出错:', error);
     vscode.window.showErrorMessage(`激活 SmartSSH-SMBA 扩展时出错: ${error.message}`);
   }
 }
@@ -79,33 +79,41 @@ function deactivate() {
  */
 function initExtension() {
   try {
-    // 创建输出通道
-    outputChannel = vscode.window.createOutputChannel('SmartSSH-SMBA');
-    outputChannel.appendLine(`[SmartSSH-SMBA] 扩展初始化中...`);
+    // 设置日志级别（可以根据需要调整）
+    logger.setLogLevel(LogLevel.INFO);
+
+    // 记录初始化信息
+    logger.info('正在初始化扩展...');
 
     // 检查 SSH 命令是否存在
-    const sshAvailable = checkSSHExecutable();
-    if (!sshAvailable) {
-      vscode.window.showErrorMessage('未找到 SSH 命令。请确保 SSH 已安装并添加到 PATH 中。');
-    }
-
-    // 加载服务器列表
-    loadServerList();
-
-    // 将终端列表存储为全局变量，以便其他函数可以访问
-    global.terminals = terminals;
-
-    outputChannel.appendLine(`[SmartSSH-SMBA] 扩展初始化完成，已加载 ${servers.length} 个服务器`);
-  } catch (error) {
-    console.error('初始化扩展组件时出错:', error);
-    if (outputChannel) {
-      outputChannel.appendLine(`[SmartSSH-SMBA] 初始化扩展组件时出错: ${error.message}`);
+    if (!commandExistsSync('ssh')) {
+      logger.error('未找到 SSH 命令，请确保已安装 SSH 客户端');
+      vscode.window.showErrorMessage('未找到 SSH 命令，请确保已安装 SSH 客户端');
     } else {
-      // 如果输出通道还没有创建，则创建它
-      outputChannel = vscode.window.createOutputChannel('SmartSSH-SMBA');
-      outputChannel.appendLine(`[SmartSSH-SMBA] 初始化扩展组件时出错: ${error.message}`);
+      logger.info('已检测到 SSH 命令');
     }
-    vscode.window.showErrorMessage(`初始化 SmartSSH-SMBA 扩展时出错: ${error.message}`);
+
+    // 创建状态栏按钮
+    fastOpenConnectionButton = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+    fastOpenConnectionButton.command = 'smartssh-smba.fastOpenConnection';
+    fastOpenConnectionButton.text = '$(terminal) 连接 SSH';
+    fastOpenConnectionButton.tooltip = '打开 SSH 连接';
+    fastOpenConnectionButton.show();
+
+    // 监听终端关闭事件
+    vscode.window.onDidCloseTerminal(terminal => {
+      // 查找关闭的终端在数组中的索引
+      const index = terminals.findIndex(t => t.terminal === terminal);
+      if (index !== -1) {
+        logger.info(`终端 ${terminals[index].name} 已关闭`);
+        // 从数组中移除该终端
+        terminals.splice(index, 1);
+      }
+    });
+
+    logger.info('扩展组件初始化完成');
+  } catch (error) {
+    logger.error(`初始化扩展组件时出错: ${error.message}`);
   }
 }
 
@@ -166,10 +174,7 @@ function registerCommands(context) {
           // 打开 SSH 连接
           openSSHConnection(serverName, true);
         } catch (error) {
-          console.error('快速打开连接时出错:', error);
-          if (outputChannel) {
-            outputChannel.appendLine(`[SmartSSH-SMBA] 快速打开连接时出错: ${error.message}`);
-          }
+          logger.error(`快速打开连接时出错: ${error.message}`);
           vscode.window.showErrorMessage(`快速打开连接时出错: ${error.message}`);
         }
       })
@@ -233,11 +238,11 @@ function registerCommands(context) {
           if (serverName) {
             openSSHConnection(serverName);
           } else {
-            outputChannel.appendLine(`[SmartSSH-SMBA] 错误: 无法确定服务器名称: ${JSON.stringify(server)}`);
+            logger.error('无法确定服务器名称');
             vscode.window.showErrorMessage('无法确定服务器名称');
           }
         } catch (error) {
-          outputChannel.appendLine(`[SmartSSH-SMBA] 连接到服务器时出错: ${error.message}`);
+          logger.error('连接到服务器时出错', error);
           vscode.window.showErrorMessage(`连接到服务器时出错: ${error.message}`);
         }
       })
@@ -371,10 +376,7 @@ function registerCommands(context) {
             vscode.window.showErrorMessage(`为工作区 ${targetFolder.name} 创建或编辑工作区配置失败`);
           }
         } catch (error) {
-          console.error('创建或编辑工作区配置时出错:', error);
-          if (outputChannel) {
-            outputChannel.appendLine(`[SmartSSH-SMBA] 创建或编辑工作区配置时出错: ${error.message}`);
-          }
+          logger.error(`创建或编辑工作区配置时出错: ${error.message}`);
           vscode.window.showErrorMessage(`创建或编辑工作区配置时出错: ${error.message}`);
         }
       })
@@ -407,11 +409,62 @@ function registerCommands(context) {
         addCommand('workspace-command');
       })
     );
+
+    // 注册日志控制命令
+    context.subscriptions.push(
+      vscode.commands.registerCommand('smartssh-smba.setLogLevel', async () => {
+        const levels = [
+          { label: 'NONE - 禁用所有日志', value: LogLevel.NONE },
+          { label: 'ERROR - 只显示错误', value: LogLevel.ERROR },
+          { label: 'WARN - 显示警告和错误', value: LogLevel.WARN },
+          { label: 'INFO - 显示信息、警告和错误（默认）', value: LogLevel.INFO },
+          { label: 'DEBUG - 显示调试信息', value: LogLevel.DEBUG },
+          { label: 'TRACE - 显示所有详细信息', value: LogLevel.TRACE }
+        ];
+
+        const selected = await vscode.window.showQuickPick(levels, {
+          placeHolder: '选择日志级别'
+        });
+
+        if (selected) {
+          logger.setLogLevel(selected.value);
+        }
+      })
+    );
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand('smartssh-smba.setLogTarget', async () => {
+        const targets = [
+          { label: 'NONE - 不输出日志', value: LogTarget.NONE },
+          { label: 'CONSOLE - 只输出到控制台', value: LogTarget.CONSOLE },
+          { label: 'OUTPUT_CHANNEL - 只输出到输出通道', value: LogTarget.OUTPUT_CHANNEL },
+          { label: 'BOTH - 同时输出到控制台和输出通道（默认）', value: LogTarget.BOTH }
+        ];
+
+        const selected = await vscode.window.showQuickPick(targets, {
+          placeHolder: '选择日志输出目标'
+        });
+
+        if (selected) {
+          logger.setLogTarget(selected.value);
+        }
+      })
+    );
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand('smartssh-smba.toggleLogging', () => {
+        if (logger.enabled) {
+          logger.disable();
+          vscode.window.showInformationMessage('SmartSSH-SMBA 日志已禁用');
+        } else {
+          logger.enable();
+          vscode.window.showInformationMessage('SmartSSH-SMBA 日志已启用');
+        }
+      })
+    );
+
   } catch (error) {
-    console.error('注册命令时出错:', error);
-    if (outputChannel) {
-      outputChannel.appendLine(`[SmartSSH-SMBA] 注册命令时出错: ${error.message}`);
-    }
+    logger.error('注册命令时出错', error);
   }
 }
 
@@ -439,16 +492,16 @@ function setupConfigWatchers(context) {
         }
 
         if (event.affectsConfiguration('smartssh-smba.config')) {
-          outputChannel.appendLine('[SmartSSH-SMBA] 检测到配置变更，正在刷新...');
+          logger.info('检测到配置变更，正在刷新...');
           debouncedRefresh();
         }
       })
     );
 
-    outputChannel.appendLine('[SmartSSH-SMBA] 配置监视器设置完成');
+    logger.info('配置监视器设置完成');
   } catch (error) {
-    console.error('设置配置监视器时出错:', error);
-    outputChannel.appendLine(`[SmartSSH-SMBA] 设置配置监视器时出错: ${error.message}`);
+    logger.error('设置配置监视器时出错:', error);
+    logger.error(`设置配置监视器时出错: ${error.message}`);
   }
 }
 
@@ -505,8 +558,8 @@ async function selectServer() {
     // 返回选择的服务器名称
     return selected.label;
   } catch (error) {
-    console.error('选择服务器时出错:', error);
-    outputChannel.appendLine(`[SmartSSH-SMBA] 选择服务器时出错: ${error.message}`);
+    logger.error('选择服务器时出错:', error);
+    logger.error(`选择服务器时出错: ${error.message}`);
     vscode.window.showErrorMessage(`选择服务器时出错: ${error.message}`);
     return null;
   }
@@ -543,10 +596,10 @@ function loadServerList() {
     // 更新状态栏按钮
     updateStatusBarButton();
 
-    outputChannel.appendLine(`[SmartSSH-SMBA] 服务器列表已加载，共 ${servers.length} 个服务器`);
+    logger.info(`服务器列表已加载，共 ${servers.length} 个服务器`);
   } catch (error) {
-    console.error('加载服务器列表时出错:', error);
-    outputChannel.appendLine(`[SmartSSH-SMBA] 加载服务器列表时出错: ${error.message}`);
+    logger.error('加载服务器列表时出错:', error);
+    logger.error(`加载服务器列表时出错: ${error.message}`);
   }
 }
 
@@ -555,23 +608,23 @@ function loadServerList() {
  */
 function updateTreeProviders() {
   try {
-    outputChannel.appendLine(`[SmartSSH-SMBA] 正在更新树视图提供者...`);
+    logger.info('正在更新树视图提供者...');
 
     // 更新服务器树视图
     if (serverTreeProvider) {
       serverTreeProvider.servers = servers;
       serverTreeProvider.refresh();
-      outputChannel.appendLine(`[SmartSSH-SMBA] 服务器树视图已更新`);
+      logger.info('服务器树视图已更新');
     }
 
     // 更新命令树视图
     if (commandTreeProvider) {
       commandTreeProvider.refresh();
-      outputChannel.appendLine(`[SmartSSH-SMBA] 命令树视图已更新`);
+      logger.info('命令树视图已更新');
     }
   } catch (error) {
-    console.error('更新树视图提供者时出错:', error);
-    outputChannel.appendLine(`[SmartSSH-SMBA] 更新树视图提供者时出错: ${error.message}`);
+    logger.error('更新树视图提供者时出错:', error);
+    logger.error(`更新树视图提供者时出错: ${error.message}`);
   }
 }
 
@@ -584,16 +637,16 @@ function checkSSHExecutable() {
     const checkResult = commandExistsSync('ssh');
 
     if (checkResult) {
-      outputChannel.appendLine(`[SmartSSH-SMBA] 在系统上找到了 SSH 命令`);
+      logger.info('在系统上找到了 SSH 命令');
     } else {
-      outputChannel.appendLine(`[SmartSSH-SMBA] 在系统上未找到 SSH 命令`);
+      logger.info('在系统上未找到 SSH 命令');
     }
 
-    outputChannel.appendLine(`[SmartSSH-SMBA] 如果您使用第三方终端，请确保其中有 SSH 工具`);
+    logger.info('如果您使用第三方终端，请确保其中有 SSH 工具');
 
     return checkResult;
   } catch (error) {
-    outputChannel.appendLine(`[SmartSSH-SMBA] 检查 SSH 命令时出错: ${error.message}`);
+    logger.error('检查 SSH 命令时出错', error);
     return false;
   }
 }
@@ -601,49 +654,60 @@ function checkSSHExecutable() {
 /**
  * 打开到指定服务器的 SSH 连接
  * @param {string} serverName - 服务器名称
- * @param {boolean} isFastOpen - 是否为快速打开
+ * @param {boolean} force - 是否强制创建新终端
+ * @returns {Promise<boolean>} - 是否成功的 Promise
  */
-async function openSSHConnection(serverName, isFastOpen = false) {
-  try {
-    // 如果没有提供服务器名称，且只有一个服务器，直接使用它
-    if (!serverName && servers.length === 1) {
-      serverName = servers[0].name;
-      outputChannel.appendLine(`[SmartSSH-SMBA] 只有一个服务器，直接使用: ${serverName}`);
-    }
+async function openSSHConnection(serverName, force = false) {
+  if (serverName === undefined) {
+    return false;
+  }
 
-    // 如果仍然没有服务器名称，让用户选择
-    if (!serverName) {
-      serverName = await selectServer();
-      if (!serverName) {
-        outputChannel.appendLine(`[SmartSSH-SMBA] 用户取消了服务器选择`);
-        return; // 用户取消
-      }
+  try {
+    // 检查 SSH 命令是否可用
+    if (!checkSSHExecutable()) {
+      vscode.window.showErrorMessage('未找到 SSH 命令。请确保 SSH 已安装并添加到 PATH 中。');
+      return false;
     }
 
     // 查找服务器配置
     const server = servers.find(s => s.name === serverName);
-
     if (!server) {
-      vscode.window.showErrorMessage(`找不到服务器 "${serverName}"`);
-      outputChannel.appendLine(`[SmartSSH-SMBA] 找不到服务器 "${serverName}"`);
-      return;
+      logger.error(`未找到服务器 ${serverName} 的配置`);
+      vscode.window.showErrorMessage(`未找到服务器 ${serverName} 的配置`);
+      return false;
     }
 
-    // 检查是否已经有该服务器的终端
+    // 验证服务器配置
+    if (server.configuration.host === undefined || server.configuration.username === undefined) {
+      logger.error(`服务器 ${serverName} 的主机或用户名未定义`);
+      vscode.window.showErrorMessage(`服务器 ${serverName} 的主机或用户名未定义`);
+      return false;
+    }
+
+    // 检查是否已存在该服务器的终端
     const existingTerminal = terminals.find(t => t.name === serverName);
 
-    if (existingTerminal) {
-      // 如果终端已存在，显示它
+    // 如果终端已存在且不强制创建新终端
+    if (existingTerminal && !force) {
+      // 显示现有终端
       existingTerminal.terminal.show();
-      outputChannel.appendLine(`[SmartSSH-SMBA] 已显示服务器 ${serverName} 的终端`);
-      return;
+      logger.info(`已存在服务器 ${serverName} 的终端，显示该终端`);
+      return true;
     }
-
-    // 检查 SSH 命令是否可用
-    if (!checkSSHExecutable()) {
-      vscode.window.showErrorMessage('未找到 SSH 命令。请确保 SSH 已安装并添加到 PATH 中。');
-      outputChannel.appendLine(`[SmartSSH-SMBA] 未找到 SSH 命令`);
-      return;
+    // 如果终端已存在且强制创建新终端
+    else if (existingTerminal && force) {
+      // 关闭旧终端
+      try {
+        existingTerminal.terminal.dispose();
+        // 从数组中移除
+        const index = terminals.findIndex(t => t.name === serverName);
+        if (index !== -1) {
+          terminals.splice(index, 1);
+        }
+        logger.info(`已关闭服务器 ${serverName} 的旧终端`);
+      } catch (error) {
+        logger.warn(`关闭旧终端时出错: ${error.message}`);
+      }
     }
 
     // 创建终端
@@ -671,32 +735,19 @@ async function openSSHConnection(serverName, isFastOpen = false) {
     const fullCommand = `${sshCommand.command} ${sshCommand.args.join(' ')}`;
     terminal.sendText(fullCommand);
 
-    // 记录日志
-    outputChannel.appendLine(`[SmartSSH-SMBA] 已打开到服务器 ${serverName} 的 SSH 连接: ${fullCommand}`);
+    // 如果使用密码认证，处理密码
+    if (sshCommand.authMethod === 'byPassword' && server.configuration.password) {
+      setTimeout(() => {
+        terminal.sendText(server.configuration.password);
+      }, 1000);
+    }
 
-    // 监听终端关闭事件
-    const disposable = vscode.window.onDidCloseTerminal(closedTerminal => {
-      if (closedTerminal === terminal) {
-        // 从列表中移除终端
-        const index = terminals.findIndex(t => t.terminal === closedTerminal);
-        if (index !== -1) {
-          terminals.splice(index, 1);
-        }
-
-        // 更新状态栏按钮
-        updateStatusBarButton();
-
-        // 记录日志
-        outputChannel.appendLine(`[SmartSSH-SMBA] 已关闭到服务器 ${serverName} 的 SSH 连接`);
-
-        // 清理事件监听器
-        disposable.dispose();
-      }
-    });
+    logger.info(`已创建到服务器 ${serverName} 的 SSH 连接`);
+    return true;
   } catch (error) {
-    console.error('打开 SSH 连接时出错:', error);
-    outputChannel.appendLine(`[SmartSSH-SMBA] 打开 SSH 连接时出错: ${error.message}`);
+    logger.error(`打开 SSH 连接时出错: ${error.message}`);
     vscode.window.showErrorMessage(`打开 SSH 连接时出错: ${error.message}`);
+    return false;
   }
 }
 
@@ -710,12 +761,11 @@ function buildSSHCommand(config) {
     // 基本 SSH 命令
     let command = 'ssh';
     let args = [];
+    let authMethod = 'byKey'; // 默认使用密钥认证
 
     // 添加主机参数
-    args.push(config.host);
-
-    // 添加用户名参数
-    args.push('-l', config.username);
+    const hostArg = `${config.username}@${config.host}`;
+    args.push(hostArg);
 
     // 添加端口参数
     if (config.port && config.port !== 22) {
@@ -725,6 +775,9 @@ function buildSSHCommand(config) {
     // 添加私钥参数
     if (config.privateKey) {
       args.push('-i', config.privateKey);
+    } else if (config.password) {
+      // 如果没有私钥但有密码，使用密码认证
+      authMethod = 'byPassword';
     }
 
     // 添加代理参数
@@ -753,24 +806,23 @@ function buildSSHCommand(config) {
       }
     }
 
-    // 如果有远程命令，添加 -t 参数和命令字符串
-    if (remoteCommands.length > 0) {
-      args.push('-t');
+    remoteCommands.push(`eval $(echo '$SHELL')`);
 
-      // 构建命令字符串，每个命令后面加分号
-      const commandString = remoteCommands.map(cmd => `${cmd};`).join(' ');
+    // 构建命令字符串，每个命令后面加分号
+    const commandString = remoteCommands.map(cmd => `${cmd};`).join(' ');
 
-      // 添加 shell 启动命令，确保交互式 shell
-      args.push(`"${commandString} eval $(echo '$SHELL') --login"`);
-    }
+    // 添加 shell 启动命令，确保交互式 shell
+    args.push(`"${commandString}"`);
+
+    args.push('--login');
 
     return {
       command: command,
-      args: args
+      args: args,
+      authMethod: authMethod
     };
   } catch (error) {
-    console.error('构建 SSH 命令时出错:', error);
-    outputChannel.appendLine(`[SmartSSH-SMBA] 构建 SSH 命令时出错: ${error.message}`);
+    logger.error(`构建 SSH 命令时出错: ${error.message}`);
     throw error;
   }
 }
@@ -806,10 +858,9 @@ function refreshServerList() {
     // 更新状态栏按钮
     updateStatusBarButton();
 
-    outputChannel.appendLine(`[SmartSSH-SMBA] 服务器列表已刷新，共 ${servers.length} 个服务器`);
+    logger.info(`服务器列表已加载，共 ${servers.length} 个服务器`);
   } catch (error) {
-    console.error('刷新服务器列表时出错:', error);
-    outputChannel.appendLine(`[SmartSSH-SMBA] 刷新服务器列表时出错: ${error.message}`);
+    logger.error(`刷新服务器列表时出错: ${error.message}`);
   }
 }
 
@@ -824,10 +875,9 @@ function refreshCommandList() {
     // 更新树视图
     updateTreeProviders();
 
-    outputChannel.appendLine('[SmartSSH-SMBA] 命令列表已刷新');
+    logger.info('命令列表已刷新');
   } catch (error) {
-    console.error('刷新命令列表时出错:', error);
-    outputChannel.appendLine(`[SmartSSH-SMBA] 刷新命令列表时出错: ${error.message}`);
+    logger.error(`刷新命令列表时出错: ${error.message}`);
   }
 }
 
@@ -838,7 +888,7 @@ function refreshCommandList() {
  */
 async function createOrEditLocalCommandsConfig(folderPath) {
   try {
-    outputChannel.appendLine(`[SmartSSH-SMBA] 正在创建或编辑工作区配置: ${folderPath}`);
+    logger.info(`正在创建或编辑工作区配置: ${folderPath}`);
 
     // 获取当前工作区配置
     const config = vscode.workspace.getConfiguration('smartssh-smba');
@@ -856,11 +906,10 @@ async function createOrEditLocalCommandsConfig(folderPath) {
       }
     );
 
-    outputChannel.appendLine(`[SmartSSH-SMBA] 工作区配置已打开`);
+    logger.info('工作区配置已打开');
     return true;
   } catch (error) {
-    console.error('创建或编辑工作区配置时出错:', error);
-    outputChannel.appendLine(`[SmartSSH-SMBA] 创建或编辑工作区配置时出错: ${error.message}`);
+    logger.error(`创建或编辑工作区配置时出错: ${error.message}`);
     return false;
   }
 }
@@ -936,7 +985,7 @@ async function deleteCommand(cmdObj) {
     vscode.window.showInformationMessage(`已删除${isWorkspace ? '工作区' : '全局'}命令 "${cmdName}"`);
   } catch (error) {
     const cmdType = cmdObj && cmdObj.contextValue === 'workspace-command' ? '工作区' : '全局';
-    outputChannel.appendLine(`[SmartSSH-SMBA] 删除${cmdType}命令时出错: ${error.message}`);
+    logger.error(`删除${cmdType}命令时出错: ${error.message}`);
     vscode.window.showErrorMessage(`删除${cmdType}命令时出错: ${error.message}`);
   }
 }
@@ -946,11 +995,11 @@ async function deleteCommand(cmdObj) {
  */
 function updateStatusBarButton() {
   try {
-    outputChannel.appendLine(`[SmartSSH-SMBA] 正在更新状态栏按钮...`);
+    logger.info('正在更新状态栏按钮...');
 
     // 如果按钮不存在，创建它
     if (!fastOpenConnectionButton) {
-      outputChannel.appendLine(`[SmartSSH-SMBA] 创建状态栏按钮...`);
+      logger.info('创建状态栏按钮...');
       fastOpenConnectionButton = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
       fastOpenConnectionButton.command = 'smartssh-smba.fastOpenConnection';
     }
@@ -958,7 +1007,7 @@ function updateStatusBarButton() {
     // 检查是否只有一个服务器
     if (servers && servers.length === 1) {
       const singleServer = servers[0];
-      outputChannel.appendLine(`[SmartSSH-SMBA] 只有一个服务器: ${singleServer.name}，直接显示连接按钮`);
+      logger.info(`只有一个服务器: ${singleServer.name}，直接显示连接按钮`);
       fastOpenConnectionButton.text = `$(terminal) 连接 ${singleServer.name}`;
       fastOpenConnectionButton.tooltip = `打开到 ${singleServer.name} 的 SSH 连接`;
       fastOpenConnectionButton.show();
@@ -970,7 +1019,7 @@ function updateStatusBarButton() {
 
     // 如果没有活动的编辑器，显示通用按钮
     if (!editor) {
-      outputChannel.appendLine(`[SmartSSH-SMBA] 没有活动的编辑器，显示通用按钮`);
+      logger.info('没有活动的编辑器，显示通用按钮');
       fastOpenConnectionButton.text = `$(terminal)  连接 SSH `;
       fastOpenConnectionButton.tooltip = '打开 SSH 连接';
       fastOpenConnectionButton.show();
@@ -982,27 +1031,27 @@ function updateStatusBarButton() {
 
     // 如果没有文件路径，显示通用按钮
     if (!filePath) {
-      outputChannel.appendLine(`[SmartSSH-SMBA] 无法获取文件路径，显示通用按钮`);
+      logger.info('无法获取文件路径，显示通用按钮');
       fastOpenConnectionButton.text = `$(terminal)  连接 SSH `;
       fastOpenConnectionButton.tooltip = '打开 SSH 连接';
       fastOpenConnectionButton.show();
       return;
     }
 
-    outputChannel.appendLine(`[SmartSSH-SMBA] 当前文件路径: ${filePath}`);
-    outputChannel.appendLine(`[SmartSSH-SMBA] 服务器数量: ${servers ? servers.length : 0}`);
+    logger.info(`当前文件路径: ${filePath}`);
+    logger.info(`服务器数量: ${servers ? servers.length : 0}`);
 
     // 查找匹配的服务器
     const matchedServer = findServerForPath(filePath);
 
     // 如果找到匹配的服务器，显示特定服务器的按钮
     if (matchedServer) {
-      outputChannel.appendLine(`[SmartSSH-SMBA] 找到匹配的服务器: ${matchedServer.name}，显示特定按钮`);
+      logger.info(`找到匹配的服务器: ${matchedServer.name}，显示特定按钮`);
       fastOpenConnectionButton.text = `$(terminal) 连接 ${matchedServer.name}`;
       fastOpenConnectionButton.tooltip = `打开到 ${matchedServer.name} 的 SSH 连接`;
     } else {
       // 如果没有找到匹配的服务器，显示通用按钮
-      outputChannel.appendLine(`[SmartSSH-SMBA] 没有匹配的服务器，显示通用按钮`);
+      logger.info('没有匹配的服务器，显示通用按钮');
       fastOpenConnectionButton.text = `$(terminal)  连接 SSH `;
       fastOpenConnectionButton.tooltip = '打开 SSH 连接';
     }
@@ -1010,9 +1059,9 @@ function updateStatusBarButton() {
     // 始终显示按钮
     fastOpenConnectionButton.show();
   } catch (error) {
-    console.error('更新状态栏按钮时出错:', error);
-    outputChannel.appendLine(`[SmartSSH-SMBA] 更新状态栏按钮时出错: ${error.message}`);
-    outputChannel.appendLine(`[SmartSSH-SMBA] 错误堆栈: ${error.stack}`);
+    logger.error('更新状态栏按钮时出错:', error);
+    logger.error(`更新状态栏按钮时出错: ${error.message}`);
+    logger.error(`错误堆栈: ${error.stack}`);
   }
 }
 
@@ -1023,54 +1072,68 @@ function updateStatusBarButton() {
  */
 function findServerForPath(filePath) {
   try {
-    outputChannel.appendLine(`[SmartSSH-SMBA] 查找匹配文件路径的服务器: ${filePath}`);
+    logger.functionStart('findServerForPath', { filePath });
 
     // 如果没有服务器配置，返回 null
     if (!servers || servers.length === 0) {
-      outputChannel.appendLine(`[SmartSSH-SMBA] 没有服务器配置`);
+      logger.debug('没有服务器配置');
       return null;
     }
 
     // 规范化文件路径并转为小写（Windows 路径不区分大小写）
     const normalizedPath = filePath.replace(/\\/g, '/').toLowerCase();
-    outputChannel.appendLine(`[SmartSSH-SMBA] 规范化后的文件路径: ${normalizedPath}`);
+    logger.debug(`规范化后的文件路径: ${normalizedPath}`);
 
-    // 遍历所有服务器，查找匹配的 SMB 映射
+    // 查找最长匹配的服务器
+    let bestMatch = null;
+    let bestMatchLength = 0;
+
     for (const server of servers) {
-      outputChannel.appendLine(`[SmartSSH-SMBA] 检查服务器: ${server.name}`);
+      logger.trace(`检查服务器: ${server.name}`);
 
-      // 检查服务器是否有 SMB 映射配置
-      if (server.configuration && server.configuration.smbMapping) {
-        const mapping = server.configuration.smbMapping;
-        outputChannel.appendLine(`[SmartSSH-SMBA] 服务器 ${server.name} 有 SMB 映射配置`);
+      // 检查服务器是否有路径映射
+      if (!server.configuration.pathMappings || server.configuration.pathMappings.length === 0) {
+        logger.trace(`服务器 ${server.name} 没有路径映射`);
+        continue;
+      }
+
+      // 检查每个路径映射
+      for (const mapping of server.configuration.pathMappings) {
+        logger.trace(`检查路径映射: ${JSON.stringify(mapping)}`);
 
         // 检查本地路径是否配置
         if (mapping.localPath) {
           // 规范化本地路径并转为小写
           const localPath = mapping.localPath.replace(/\\/g, '/').toLowerCase();
-          outputChannel.appendLine(`[SmartSSH-SMBA] 服务器 ${server.name} 的本地路径: ${localPath}`);
+          logger.debug(`服务器 ${server.name} 的本地路径: ${localPath}`);
 
-          // 检查文件路径是否在本地路径下
+          // 检查文件路径是否以本地路径开头
           if (normalizedPath.startsWith(localPath)) {
-            outputChannel.appendLine(`[SmartSSH-SMBA] 找到匹配的服务器: ${server.name}, 本地路径: ${localPath}`);
-            return server;
-          } else {
-            outputChannel.appendLine(`[SmartSSH-SMBA] 文件路径不在服务器 ${server.name} 的本地路径下`);
+            const matchLength = localPath.length;
+            logger.debug(`找到匹配，长度: ${matchLength}`);
+
+            // 如果这是最长匹配，更新最佳匹配
+            if (matchLength > bestMatchLength) {
+              bestMatch = server;
+              bestMatchLength = matchLength;
+              logger.debug(`更新最佳匹配为: ${server.name}`);
+            }
           }
-        } else {
-          outputChannel.appendLine(`[SmartSSH-SMBA] 服务器 ${server.name} 没有配置本地路径`);
         }
-      } else {
-        outputChannel.appendLine(`[SmartSSH-SMBA] 服务器 ${server.name} 没有 SMB 映射配置`);
       }
     }
 
-    outputChannel.appendLine(`[SmartSSH-SMBA] 没有找到匹配的服务器`);
+    if (bestMatch) {
+      logger.info(`找到匹配的服务器: ${bestMatch.name}`);
+      logger.functionEnd('findServerForPath', { serverName: bestMatch.name });
+      return bestMatch;
+    }
+
+    logger.debug('没有找到匹配的服务器');
+    logger.functionEnd('findServerForPath', { serverName: null });
     return null;
   } catch (error) {
-    console.error('查找匹配服务器时出错:', error);
-    outputChannel.appendLine(`[SmartSSH-SMBA] 查找匹配服务器时出错: ${error.message}`);
-    outputChannel.appendLine(`[SmartSSH-SMBA] 错误堆栈: ${error.stack}`);
+    logger.error('查找匹配服务器时出错', error);
     return null;
   }
 }
@@ -1212,7 +1275,7 @@ async function addServer() {
 
     vscode.window.showInformationMessage(`已添加服务器 "${serverName}"`);
   } catch (error) {
-    outputChannel.appendLine(`[SmartSSH-SMBA] 添加服务器时出错: ${error.message}`);
+    logger.error(`添加服务器时出错: ${error.message}`);
     vscode.window.showErrorMessage(`添加服务器时出错: ${error.message}`);
   }
 }
@@ -1416,7 +1479,7 @@ async function editServer(server) {
 
     vscode.window.showInformationMessage(`已更新服务器 "${newServerName}"`);
   } catch (error) {
-    outputChannel.appendLine(`[SmartSSH-SMBA] 编辑服务器时出错: ${error.message}`);
+    logger.error(`编辑服务器时出错: ${error.message}`);
     vscode.window.showErrorMessage(`编辑服务器时出错: ${error.message}`);
   }
 }
@@ -1493,7 +1556,7 @@ async function deleteServer(server) {
 
     vscode.window.showInformationMessage(`已删除服务器 "${serverName}"`);
   } catch (error) {
-    outputChannel.appendLine(`[SmartSSH-SMBA] 删除服务器时出错: ${error.message}`);
+    logger.error(`删除服务器时出错: ${error.message}`);
     vscode.window.showErrorMessage(`删除服务器时出错: ${error.message}`);
   }
 }
@@ -1506,7 +1569,7 @@ async function addCommand(contextValue) {
   try {
     // 确定是否为工作区命令
     const isWorkspace = contextValue === 'workspace-commands-group' || contextValue === 'workspace-command';
-    
+
     // 提示用户输入命令名称
     const name = await vscode.window.showInputBox({
       prompt: `输入${isWorkspace ? '工作区' : '全局'}命令名称`,
@@ -1586,7 +1649,7 @@ async function addCommand(contextValue) {
     vscode.window.showInformationMessage(`已添加${isWorkspace ? '工作区' : '全局'}命令 "${name}"`);
   } catch (error) {
     const cmdType = contextValue === 'workspace-commands-group' || contextValue === 'workspace-command' ? '工作区' : '全局';
-    outputChannel.appendLine(`[SmartSSH-SMBA] 添加${cmdType}命令时出错: ${error.message}`);
+    logger.error(`添加${cmdType}命令时出错: ${error.message}`);
     vscode.window.showErrorMessage(`添加${cmdType}命令时出错: ${error.message}`);
   }
 }
@@ -1699,7 +1762,7 @@ async function editCommand(cmdObj) {
     vscode.window.showInformationMessage(`已更新${isWorkspace ? '工作区' : '全局'}命令 "${name}"`);
   } catch (error) {
     const cmdType = cmdObj && cmdObj.contextValue === 'workspace-command' ? '工作区' : '全局';
-    outputChannel.appendLine(`[SmartSSH-SMBA] 编辑${cmdType}命令时出错: ${error.message}`);
+    logger.error(`编辑${cmdType}命令时出错: ${error.message}`);
     vscode.window.showErrorMessage(`编辑${cmdType}命令时出错: ${error.message}`);
   }
 }
@@ -1715,91 +1778,88 @@ function openServerSettings() {
       'smartssh-smba.config.serverList'
     );
 
-    outputChannel.appendLine(`[SmartSSH-SMBA] 已打开服务器设置页面`);
+    logger.info('已打开服务器设置页面');
   } catch (error) {
-    outputChannel.appendLine(`[SmartSSH-SMBA] 打开服务器设置页面时出错: ${error.message}`);
+    logger.error('打开服务器设置页面时出错', error);
     vscode.window.showErrorMessage(`打开服务器设置页面时出错: ${error.message}`);
   }
 }
 
 /**
- * 发送命令到终端
+ * 发送命令
  * @param {Object} item - 命令项
  */
 async function sendCommand(item) {
   try {
-    // 获取命令对象和服务器
-    const commandObj = item.commandObj;
-    const server = item.server;
-    const isServerCommand = item.contextValue === 'serverCommand';
-    const isInitCommand = item.isInitCommand === true;
+    logger.functionStart('sendCommand', { item });
 
-    // 如果没有命令对象，返回
-    if (!commandObj) {
-      vscode.window.showErrorMessage('无效的命令');
+    // 获取命令文本
+    let commandText = '';
+    let serverName = null;
+
+    // 处理不同类型的命令项
+    if (item.commandObj) {
+      // 如果是命令对象
+      commandText = item.commandObj.command;
+      logger.debug(`从命令对象获取命令: ${commandText}`);
+    } else if (typeof item === 'string') {
+      // 如果是字符串
+      commandText = item;
+      logger.debug(`从字符串获取命令: ${commandText}`);
+    } else {
+      // 如果是其他类型，尝试获取命令文本
+      commandText = item.command || item.label || '';
+      logger.debug(`从其他类型获取命令: ${commandText}`);
+    }
+
+    // 如果命令为空，显示错误
+    if (!commandText) {
+      logger.error('命令为空');
+      vscode.window.showErrorMessage('命令为空');
       return;
     }
 
-    // 获取命令文本
-    const commandText = commandObj.command;
+    // 检查是否有服务器
+    if (item.server) {
+      // 如果命令项有服务器属性，使用该服务器
+      const server = item.server;
+      serverName = server.name;
+      logger.debug(`命令关联的服务器: ${serverName}`);
 
-    // 记录命令类型，便于调试
-    outputChannel.appendLine(`[SmartSSH-SMBA] 命令类型: ${isServerCommand ? '服务器命令' : '扩展命令'}, 初始化命令: ${isInitCommand}`);
+      // 检查是否是初始化命令
+      const isInitCommand = item.contextValue === 'init-command';
+      logger.debug(`是否为初始化命令: ${isInitCommand}`);
 
-    // 如果有服务器，发送到服务器终端
-    if (server) {
-      // 获取服务器名称
-      const serverName = server.name;
-
-      // 查找现有终端
+      // 查找是否已有该服务器的终端
       const existingTerminal = terminals.find(t => t.name === serverName);
+      logger.debug(`服务器 ${serverName} 是否已有终端: ${!!existingTerminal}`);
 
-      if (existingTerminal) {
-        // 如果终端已存在，直接显示
-        existingTerminal.terminal.show();
-
-        // 如果不是初始化命令，发送命令
-        if (!isInitCommand) {
-          existingTerminal.terminal.sendText(commandText);
-          outputChannel.appendLine(`[SmartSSH-SMBA] 已发送命令到服务器 ${serverName}: ${commandText}`);
-        } else {
-          outputChannel.appendLine(`[SmartSSH-SMBA] 初始化命令不会重复发送: ${commandText}`);
-        }
-      } else {
-        // 如果终端不存在，打开新连接
-        outputChannel.appendLine(`[SmartSSH-SMBA] 服务器 ${serverName} 的终端不存在，正在打开新连接...`);
-
-        // 打开新连接
+      if (isInitCommand && !existingTerminal) {
+        // 如果是初始化命令且服务器未连接，则连接服务器
+        // 连接过程会自动执行初始化命令
+        logger.info(`初始化命令：服务器 ${serverName} 未连接，正在连接...`);
         await openSSHConnection(serverName);
-
-        // 如果不是初始化命令，需要等待连接完成后发送
-        // 初始化命令会在连接时自动执行，不需要再发送
-        if (!isInitCommand) {
-          // 等待终端创建完成
-          await new Promise(resolve => setTimeout(resolve, 1000));
-
-          // 查找新创建的终端
-          const newTerminal = terminals.find(t => t.name === serverName);
-
-          if (newTerminal) {
-            // 发送命令到新终端
-            newTerminal.terminal.show();
-            newTerminal.terminal.sendText(commandText);
-            outputChannel.appendLine(`[SmartSSH-SMBA] 已发送命令到服务器 ${serverName}: ${commandText}`);
-          } else {
-            outputChannel.appendLine(`[SmartSSH-SMBA] 错误: 无法找到服务器 ${serverName} 的终端`);
-            vscode.window.showErrorMessage(`无法找到服务器 ${serverName} 的终端`);
-          }
-        }
+        return;
       }
+
+      // 查找或创建终端
+      const terminal = findOrCreateTerminal(server);
+      terminal.show();
+
+      // 发送命令
+      terminal.sendText(commandText);
+      logger.info(`已发送命令到服务器 ${serverName}: ${commandText}`);
     } else {
       // 如果没有服务器，检查是否有活动的 SSH 终端
       if (terminals.length > 0) {
+        logger.debug(`有 ${terminals.length} 个活动的 SSH 终端`);
+
         // 如果有多个终端，让用户选择
         let targetTerminal;
 
         if (terminals.length === 1) {
           targetTerminal = terminals[0];
+          logger.debug(`只有一个终端，直接使用: ${targetTerminal.name}`);
         } else {
           // 尝试获取当前活动的终端
           const activeTerminal = vscode.window.activeTerminal;
@@ -1811,8 +1871,10 @@ async function sendCommand(item) {
           if (activeSSHTerminal) {
             // 如果当前活动的终端是 SSH 终端，直接使用
             targetTerminal = activeSSHTerminal;
+            logger.debug(`使用当前活动的 SSH 终端: ${targetTerminal.name}`);
           } else {
             // 否则让用户选择
+            logger.debug('显示终端选择列表');
             const terminalItems = terminals.map(t => ({
               label: t.name,
               description: `${t.username}@${t.host}`,
@@ -1825,18 +1887,22 @@ async function sendCommand(item) {
             );
 
             if (!selected) {
+              logger.debug('用户取消了终端选择');
               return; // 用户取消
             }
 
             targetTerminal = selected.terminal;
+            logger.debug(`用户选择了终端: ${targetTerminal.name}`);
           }
         }
 
         // 发送命令到选定的终端
         targetTerminal.terminal.show();
         targetTerminal.terminal.sendText(commandText);
-        outputChannel.appendLine(`[SmartSSH-SMBA] 已发送命令到终端 ${targetTerminal.name}: ${commandText}`);
+        logger.info(`已发送命令到终端 ${targetTerminal.name}: ${commandText}`);
       } else {
+        logger.debug('没有活动的 SSH 终端，询问用户操作');
+
         // 如果没有 SSH 终端，询问用户是否要连接服务器
         const result = await vscode.window.showInformationMessage(
           '没有活动的 SSH 连接。是否连接服务器?',
@@ -1845,13 +1911,18 @@ async function sendCommand(item) {
           '取消'
         );
 
+        logger.debug(`用户选择: ${result}`);
+
         if (result === '连接') {
           // 选择服务器并连接
           const serverName = await selectServer();
 
           if (!serverName) {
+            logger.debug('用户取消了服务器选择');
             return; // 用户取消
           }
+
+          logger.debug(`用户选择了服务器: ${serverName}`);
 
           // 打开连接
           await openSSHConnection(serverName);
@@ -1866,9 +1937,9 @@ async function sendCommand(item) {
             // 发送命令到新终端
             newTerminal.terminal.show();
             newTerminal.terminal.sendText(commandText);
-            outputChannel.appendLine(`[SmartSSH-SMBA] 已发送命令到服务器 ${serverName}: ${commandText}`);
+            logger.info(`已发送命令到服务器 ${serverName}: ${commandText}`)
           } else {
-            outputChannel.appendLine(`[SmartSSH-SMBA] 错误: 无法找到服务器 ${serverName} 的终端`);
+            logger.error(`无法找到服务器 ${serverName} 的终端`);
             vscode.window.showErrorMessage(`无法找到服务器 ${serverName} 的终端`);
           }
         } else if (result === '发送到本地终端') {
@@ -1876,16 +1947,18 @@ async function sendCommand(item) {
           const terminal = findOrCreateLocalTerminal();
           terminal.show();
           terminal.sendText(commandText);
-          outputChannel.appendLine(`[SmartSSH-SMBA] 已发送命令到本地终端: ${commandText}`);
+          logger.info(`已发送命令到本地终端: ${commandText}`);
         } else {
           // 用户取消
+          logger.debug('用户取消了操作');
           return;
         }
       }
     }
+
+    logger.functionEnd('sendCommand');
   } catch (error) {
-    console.error('发送命令时出错:', error);
-    outputChannel.appendLine(`[SmartSSH-SMBA] 发送命令时出错: ${error.message}`);
+    logger.error('发送命令时出错', error);
     vscode.window.showErrorMessage(`发送命令时出错: ${error.message}`);
   }
 }
@@ -1908,7 +1981,7 @@ function findOrCreateTerminal(server) {
       return existingTerminal.terminal;
     } else {
       // 如果终端不存在，打开新连接
-      outputChannel.appendLine(`[SmartSSH-SMBA] 服务器 ${serverName} 的终端不存在，正在打开新连接...`);
+      logger.info(`服务器 ${serverName} 的终端不存在，正在打开新连接...`);
 
       // 打开 SSH 连接
       openSSHConnection(serverName);
@@ -1924,14 +1997,14 @@ function findOrCreateTerminal(server) {
         return newTerminal.terminal;
       } else {
         // 如果找不到终端，创建一个新的本地终端作为后备
-        outputChannel.appendLine(`[SmartSSH-SMBA] 警告: 无法找到服务器 ${serverName} 的终端，创建本地终端代替`);
+        logger.warn('警告: 无法找到服务器 ' + serverName + ' 的终端，创建本地终端代替');
         const fallbackTerminal = vscode.window.createTerminal(`SmartSSH-SMBA: ${serverName}`);
         return fallbackTerminal;
       }
     }
   } catch (error) {
-    console.error('查找或创建终端时出错:', error);
-    outputChannel.appendLine(`[SmartSSH-SMBA] 查找或创建终端时出错: ${error.message}`);
+    logger.error('查找或创建终端时出错:', error);
+    logger.error(`查找或创建终端时出错: ${error.message}`);
 
     // 出错时创建一个本地终端作为后备
     const fallbackTerminal = vscode.window.createTerminal('SmartSSH-SMBA');
@@ -1957,8 +2030,8 @@ function findOrCreateLocalTerminal() {
       return newTerminal;
     }
   } catch (error) {
-    console.error('查找或创建本地终端时出错:', error);
-    outputChannel.appendLine(`[SmartSSH-SMBA] 查找或创建本地终端时出错: ${error.message}`);
+    logger.error('查找或创建本地终端时出错:', error);
+    logger.error(`查找或创建本地终端时出错: ${error.message}`);
 
     // 出错时创建一个新终端作为后备
     const fallbackTerminal = vscode.window.createTerminal('SmartSSH-SMBA Local');
@@ -2004,7 +2077,7 @@ function getRemotePathFromSmbMapping(serverConfig) {
       normalizedWorkspacePath = normalizedWorkspacePath.substring(2);
     } else {
       // 如果不在同一个驱动器上，则无法映射
-      outputChannel.appendLine(`工作区路径 ${currentWorkspacePath} 与配置的 SMB 路径 ${serverConfig.smbMapping.localPath} 不在同一个驱动器上`);
+      logger.warn('工作区路径 ' + currentWorkspacePath + ' 与配置的 SMB 路径 ' + serverConfig.smbMapping.localPath + ' 不在同一个驱动器上');
       return serverConfig.smbMapping.remotePath;
     }
   }
@@ -2048,7 +2121,7 @@ function getRemotePathFromSmbMapping(serverConfig) {
   }
 
   // 如果不在 SMB 路径中，则返回默认远程路径
-  outputChannel.appendLine(`无法映射工作区路径 ${currentWorkspacePath} 到远程路径`);
+  logger.warn('无法映射工作区路径 ' + currentWorkspacePath + ' 到远程路径');
   return serverConfig.smbMapping.remotePath;
 }
 

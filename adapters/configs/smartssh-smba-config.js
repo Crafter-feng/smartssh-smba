@@ -29,7 +29,7 @@ module.exports = {
         configs: configs
       };
     } catch (error) {
-      console.error('加载 SmartSSH-SMBA 配置时出错:', error);
+      logger.error('加载 SmartSSH-SMBA 配置时出错:', error);
       return {
         result: false,
         configs: []

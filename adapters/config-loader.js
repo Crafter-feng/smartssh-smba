@@ -3,6 +3,7 @@ const path = require('path');
 const homedir = require('os').homedir();
 const fs = require('fs');
 const vscode = require('vscode');
+const { logger } = require('./logger');
 
 // 添加缓存机制
 let configCache = null;
@@ -23,19 +24,6 @@ var pathjoin = (function (_super) {
 config.supported_configs = {
   'smartssh-smba': require('./configs/smartssh-smba-config'),
 };
-
-// 配置变更回调
-let configChangeCallback = null;
-
-/**
- * 启动配置文件监视器
- * @returns {vscode.Disposable} 配置变更事件的处置对象
- * @deprecated 使用 vscode.workspace.onDidChangeConfiguration 代替
- */
-function startWatchers() {
-  console.log('[SmartSSH-SMBA] 配置监视器已弃用，请使用 vscode.workspace.onDidChangeConfiguration');
-  return { dispose: () => { } }; // 返回一个空的可处置对象
-}
 
 // 获取用户设置位置
 config.getUserSettingsLocation = function (filename) {
@@ -103,7 +91,7 @@ function loadConfig() {
     return configCache;
   }
   try {
-    console.log('[SmartSSH-SMBA] 正在加载配置...');
+    logger.info(' 正在加载配置...');
     const config = vscode.workspace.getConfiguration('smartssh-smba');
 
     // 获取全局配置
@@ -137,7 +125,7 @@ function loadConfig() {
       }))
     };
 
-    console.log(`[SmartSSH-SMBA] 配置加载完成，服务器数量: ${integratedConfig.serverList ? integratedConfig.serverList.length : 0}`);
+    logger.info(` 配置加载完成，服务器数量: ${integratedConfig.serverList ? integratedConfig.serverList.length : 0}`);
 
     // 更新缓存和时间戳
     configCache = integratedConfig;
@@ -145,7 +133,7 @@ function loadConfig() {
 
     return integratedConfig;
   } catch (error) {
-    console.error('[SmartSSH-SMBA] 加载配置时出错:', error);
+    logger.error(' 加载配置时出错:', error);
     // 返回默认配置
     return {
       showHostsInPickLists: false,
@@ -170,7 +158,7 @@ function clearConfigCache() {
  */
 async function saveConfig(configData, saveToWorkspace = false) {
   try {
-    console.log('[SmartSSH-SMBA] 正在保存配置...');
+    logger.info(' 正在保存配置...');
 
     // 清除缓存，确保下次加载时获取最新配置
     clearConfigCache();
@@ -187,10 +175,10 @@ async function saveConfig(configData, saveToWorkspace = false) {
       global._smartsshSavingConfig = false;
     }, 100);
 
-    console.log('[SmartSSH-SMBA] 配置保存完成');
+    logger.info(' 配置保存完成');
   } catch (error) {
     global._smartsshSavingConfig = false;
-    console.error('[SmartSSH-SMBA] 保存配置时出错:', error);
+    logger.error(' 保存配置时出错:', error);
     throw error;
   }
 }
@@ -260,16 +248,16 @@ async function updateWorkspaceCommands(commands) {
 
     // 更新工作区命令
     workspaceConfig.customCommands = commands.map(cmd => {
-      // 移除工作区特定属性
-      const { isWorkspaceCommand, workspaceName, ...cleanCmd } = cmd;
+      // 移除工作区特定属性，但保留 contextValue
+      const { workspaceName, ...cleanCmd } = cmd;
       return cleanCmd;
     });
 
     // 保存到工作区配置
     await config.update('config', workspaceConfig, vscode.ConfigurationTarget.Workspace);
-    console.log('[SmartSSH-SMBA] 工作区命令已更新');
+    logger.info(' 工作区命令已更新');
   } catch (error) {
-    console.error('[SmartSSH-SMBA] 更新工作区命令时出错:', error);
+    logger.error(' 更新工作区命令时出错:', error);
     throw error;
   }
 }
@@ -280,7 +268,7 @@ async function updateWorkspaceCommands(commands) {
  * @deprecated 使用 vscode.workspace.onDidChangeConfiguration 代替
  */
 function setWatcherCallback(callback) {
-  console.log('[SmartSSH-SMBA] 配置监视回调已弃用，请使用 vscode.workspace.onDidChangeConfiguration');
+  logger.info(' 配置监视回调已弃用，请使用 vscode.workspace.onDidChangeConfiguration');
   // 不执行任何操作
 }
 
@@ -293,7 +281,5 @@ module.exports = {
   updateServerList,
   updateCustomCommands,
   updateWorkspaceCommands,
-  startWatchers,
-  setWatcherCallback,
   clearConfigCache
 };

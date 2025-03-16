@@ -1,7 +1,122 @@
+/* eslint-disable @stylistic/no-trailing-spaces */
+/* eslint-disable @stylistic/comma-dangle */
 const vscode = require('vscode');
 const configLoader = require('../adapters/config-loader');
+const { logger } = require('../adapters/logger');
 
-class ServerTreeItem extends vscode.TreeItem {
+/**
+ * 获取适当的图标
+ * @param {string|Object} item - 项目键名或命令
+ * @returns {vscode.ThemeIcon} - 主题图标
+ */
+function getIconForItem(item) {
+  // 统一的图标映射，使用模式匹配
+  const iconPatterns = [
+    { pattern: ['host', 'hostname', 'server'], icon: 'globe' },
+    { pattern: ['username', 'user', 'account'], icon: 'person' },
+    { pattern: ['port', 'socket'], icon: 'plug' },
+    { pattern: ['password', 'pwd', 'secret'], icon: 'lock' },
+    { pattern: ['privateKey', 'key', 'certificate'], icon: 'key' },
+    { pattern: ['agent', 'proxy'], icon: 'shield' },
+    { pattern: ['path'], icon: 'folder' },
+    { pattern: ['localPath', 'local'], icon: 'folder-opened' },
+    { pattern: ['remotePath', 'remote'], icon: 'remote' },
+    { pattern: ['ls', 'dir', 'list'], icon: 'list-tree' },
+    { pattern: ['cd', 'chdir'], icon: 'folder' },
+    { pattern: ['git'], icon: 'git-branch' },
+    { pattern: ['npm', 'yarn', 'pnpm'], icon: 'package' },
+    { pattern: ['docker', 'container'], icon: 'server-environment' },
+    { pattern: ['ssh', 'telnet'], icon: 'remote-explorer' },
+    { pattern: ['cat', 'less', 'more', 'type'], icon: 'file-text' },
+    { pattern: ['rm', 'del', 'delete', 'remove'], icon: 'trash' },
+    { pattern: ['cp', 'copy'], icon: 'files' },
+    { pattern: ['mv', 'move', 'rename'], icon: 'arrow-right' },
+    { pattern: ['mkdir', 'md'], icon: 'new-folder' },
+    { pattern: ['touch', 'new-item', 'ni'], icon: 'new-file' },
+    { pattern: ['chmod', 'chown', 'permission'], icon: 'shield' },
+    { pattern: ['ps', 'top', 'process'], icon: 'pulse' },
+    { pattern: ['grep', 'find', 'search'], icon: 'search' }
+  ];
+
+  // 获取要匹配的文本
+  let textToMatch = '';
+  if (typeof item === 'string') {
+    textToMatch = item;
+  } else if (item && item.command) {
+    textToMatch = item.command;
+  } else {
+    // 如果没有有效的文本，返回默认图标
+    return new vscode.ThemeIcon('terminal');
+  }
+
+  // 转为小写以便不区分大小写匹配
+  const lowerText = textToMatch.toLowerCase();
+  
+  // 查找匹配的图标
+  for (const pattern of iconPatterns) {
+    if (pattern.pattern.some(p => lowerText.includes(p.toLowerCase()))) {
+      return new vscode.ThemeIcon(pattern.icon);
+    }
+  }
+  
+  // 默认图标
+  return new vscode.ThemeIcon('terminal');
+}
+
+/**
+ * 基础树项类 - 包含共享的功能
+ */
+class BaseTreeItem extends vscode.TreeItem {
+  /**
+   * 设置命令相关属性
+   * @param {Object} commandObj - 命令对象
+   * @param {string} contextValue - 上下文值
+   * @param {boolean} enableClickAction - 是否启用点击动作
+   */
+  setupCommandProperties(commandObj, contextValue, enableClickAction = false) {
+    // 设置图标
+    if (commandObj && commandObj.icon) {
+      this.iconPath = new vscode.ThemeIcon(commandObj.icon);
+    } else {
+      this.iconPath = getIconForItem(commandObj ? commandObj.command : this.label);
+    }
+
+    // 设置工具提示
+    if (commandObj) {
+      this.tooltip = `执行命令: ${commandObj.command}`;
+      if (commandObj.description) {
+        this.tooltip += `\n${commandObj.description}`;
+      }
+    } else {
+      this.tooltip = `执行命令: ${this.label}`;
+    }
+
+    // 设置点击命令
+    if (enableClickAction) {
+      this.command = {
+        command: 'smartssh-smba.sendCommand',
+        title: '发送命令',
+        arguments: [this]
+      };
+    } else {
+      this.command = null;
+    }
+  }
+}
+
+/**
+ * 服务器树项
+ */
+class ServerTreeItem extends BaseTreeItem {
+  /**
+   * 创建服务器树项
+   * @param {string} label - 显示的标签
+   * @param {vscode.TreeItemCollapsibleState} collapsibleState - 可折叠状态
+   * @param {Object} server - 服务器对象
+   * @param {string} contextValue - 上下文值
+   * @param {string} configKey - 配置键（可选）
+   * @param {Object} commandObj - 命令对象（可选）
+   */
   constructor(label, collapsibleState, server, contextValue, configKey = null, commandObj = null) {
     super(label, collapsibleState);
     this.server = server;
@@ -9,177 +124,100 @@ class ServerTreeItem extends vscode.TreeItem {
     this.configKey = configKey;
     this.commandObj = commandObj;
 
-    if (contextValue === 'server') {
-      this.iconPath = new vscode.ThemeIcon('server');
-      this.description = `${server.configuration.username}@${server.configuration.host}`;
-      this.tooltip = `${label}\n${server.configuration.username}@${server.configuration.host}`;
-      this.command = {
-        command: 'smartssh-smba.connectToServer',
-        title: '连接到服务器',
-        arguments: [label],
-      };
-    } else if (contextValue === 'command' || contextValue === 'workspace-command' || contextValue === 'global-command' || contextValue === 'serverCommand') {
-      // 统一处理所有命令类型
-      this.setupCommandItem(contextValue);
-    } else if (contextValue === 'config') {
-      // 配置项显示，根据不同配置类型使用不同图标
-      this.iconPath = getIconForConfig(configKey);
-
-      // 如果是密码，显示星号
-      if (configKey === 'password' && server.configuration[configKey]) {
-        this.description = '********';
-      } else if (configKey === 'privateKey' && server.configuration[configKey]) {
-        // 显示密钥路径，但只显示文件名部分
-        const keyPath = server.configuration[configKey];
-        this.description = keyPath;
-        this.tooltip = `私钥文件路径: ${keyPath}`;
-      } else {
-        this.description = server.configuration[configKey] !== undefined
-          ? String(server.configuration[configKey])
-          : '';
-      }
-    } else if (contextValue === 'config-group') {
-      this.iconPath = new vscode.ThemeIcon('settings');
-    } else if (contextValue === 'init-commands-group' || contextValue === 'custom-commands-group') {
-      this.iconPath = new vscode.ThemeIcon('terminal');
-    } else if (contextValue === 'smb-group') {
-      this.iconPath = new vscode.ThemeIcon('folder-opened');
-    } else if (contextValue === 'global-commands-group') {
-      this.iconPath = new vscode.ThemeIcon('globe');
-    } else if (contextValue === 'workspace-commands-group') {
-      this.iconPath = new vscode.ThemeIcon('folder');
-    } else if (contextValue === 'connected-servers-group') {
-      this.iconPath = new vscode.ThemeIcon('remote-explorer');
+    // 根据不同的上下文值设置不同的属性
+    switch (contextValue) {
+      case 'server':
+        this.setupServerItem();
+        break;
+      case 'command':
+      case 'workspace-command':
+      case 'global-command':
+      case 'serverCommand':
+      case 'init-command':
+      case 'server-command':
+        this.setupCommandProperties(commandObj, contextValue, false);
+        break;
+      case 'config':
+        this.setupConfigItem();
+        break;
+      case 'config-group':
+        this.iconPath = new vscode.ThemeIcon('settings');
+        break;
+      case 'init-commands-group':
+      case 'custom-commands-group':
+        this.iconPath = new vscode.ThemeIcon('terminal');
+        break;
+      case 'smb-group':
+        this.iconPath = new vscode.ThemeIcon('folder-opened');
+        break;
+      case 'global-commands-group':
+        this.iconPath = new vscode.ThemeIcon('globe');
+        break;
+      case 'workspace-commands-group':
+        this.iconPath = new vscode.ThemeIcon('folder');
+        break;
+      case 'connected-servers-group':
+        this.iconPath = new vscode.ThemeIcon('remote-explorer');
+        break;
     }
   }
 
   /**
-   * 设置命令项的属性
-   * @param {string} contextValue - 上下文值
+   * 设置服务器项的属性
    */
-  setupCommandItem(contextValue) {
-    // 为命令分配图标
-    if (this.commandObj && this.commandObj.icon) {
-      // 如果命令对象中已有图标，使用它
-      this.iconPath = new vscode.ThemeIcon(this.commandObj.icon);
+  setupServerItem() {
+    this.iconPath = new vscode.ThemeIcon('server');
+    this.description = `${this.server.configuration.username}@${this.server.configuration.host}`;
+    this.tooltip = `${this.label}\n${this.server.configuration.username}@${this.server.configuration.host}`;
+    this.command = null; // 不自动执行命令，使用右键菜单
+  }
+
+  /**
+   * 设置配置项的属性
+   */
+  setupConfigItem() {
+    // 根据配置类型设置图标
+    this.iconPath = getIconForItem(this.configKey);
+
+    // 根据配置类型设置描述和工具提示
+    if (this.configKey === 'password' && this.server.configuration[this.configKey]) {
+      this.description = '********';
+    } else if (this.configKey === 'privateKey' && this.server.configuration[this.configKey]) {
+      const keyPath = this.server.configuration[this.configKey];
+      this.description = keyPath;
+      this.tooltip = `私钥文件路径: ${keyPath}`;
     } else {
-      // 否则使用默认图标或根据命令内容选择图标
-      this.iconPath = getIconForCommand(this.commandObj ? this.commandObj.command : this.label);
-    }
-
-    // 如果是自定义命令对象（带有name和command）
-    if (this.commandObj) {
-      // 添加工作区信息到描述（仅对工作区）
-      if (contextValue === 'workspace-command' && this.commandObj.workspaceName) {
-        this.description = this.commandObj.workspaceName;
-      } else if (this.commandObj.description) {
-        // 如果有描述，显示在描述字段中
-        this.description = this.commandObj.description;
-      }
-
-      this.tooltip = `执行命令: ${this.commandObj.command}`;
-      if (this.commandObj.description) {
-        this.tooltip += `\n${this.commandObj.description}`;
-      }
-
-      // 移除点击命令时的自动执行
-      this.command = undefined;
-
-      // 如果是用户或工作区（没有服务器），设置特殊的 contextValue 以便显示删除按钮
-      if (!this.server) {
-        this.contextValue = contextValue;
-      }
-    } else {
-      // 如果是简单的命令字符串
-      this.tooltip = `执行命令: ${this.label}`;
-
-      // 移除点击命令时的自动执行
-      this.command = undefined;
+      this.description = this.server.configuration[this.configKey] !== undefined
+        ? String(this.server.configuration[this.configKey])
+        : '';
     }
   }
 }
 
 /**
- * 根据配置类型获取适当的图标
- * @param {string} configKey - 配置键名
- * @returns {vscode.ThemeIcon} - 主题图标
+ * 命令树项
  */
-function getIconForConfig(configKey) {
-  switch (configKey) {
-    case 'host':
-      return new vscode.ThemeIcon('globe');
-    case 'username':
-      return new vscode.ThemeIcon('person');
-    case 'port':
-      return new vscode.ThemeIcon('plug');
-    case 'password':
-      return new vscode.ThemeIcon('lock');
-    case 'privateKey':
-      return new vscode.ThemeIcon('key');
-    case 'agent':
-      return new vscode.ThemeIcon('shield');
-    case 'path':
-      return new vscode.ThemeIcon('folder');
-    case 'localPath':
-      return new vscode.ThemeIcon('folder-opened');
-    case 'remotePath':
-      return new vscode.ThemeIcon('remote');
-    default:
-      return new vscode.ThemeIcon('settings-gear');
-  }
-}
+class CommandTreeItem extends BaseTreeItem {
+  /**
+   * 创建命令树项
+   * @param {string} label - 显示的标签
+   * @param {vscode.TreeItemCollapsibleState} collapsibleState - 可折叠状态
+   * @param {Object} commandObj - 命令对象
+   * @param {string} contextValue - 上下文值
+   * @param {Object} server - 服务器对象（可选）
+   */
+  constructor(label, collapsibleState, commandObj, contextValue, server = null) {
+    super(label, collapsibleState);
 
-/**
- * 根据命令获取图标
- * @param {string|Object} command - 命令或命令对象
- * @returns {vscode.ThemeIcon} - 图标
- */
-function getIconForCommand(command) {
-  // 确保命令是字符串
-  const cmdText = typeof command === 'string'
-    ? command
-    : (command && command.command)
-      ? command.command
-      : '';
+    this.commandObj = commandObj;
+    this.contextValue = contextValue;
+    this.server = server;
 
-  if (!cmdText) {
-    return new vscode.ThemeIcon('terminal');
-  }
-
-  const lowerCmd = cmdText.toLowerCase();
-
-  if (lowerCmd.includes('ls') || lowerCmd.includes('dir')) {
-    return new vscode.ThemeIcon('list-tree');
-  } else if (lowerCmd.includes('cd')) {
-    return new vscode.ThemeIcon('folder');
-  } else if (lowerCmd.includes('git')) {
-    return new vscode.ThemeIcon('git-branch');
-  } else if (lowerCmd.includes('npm') || lowerCmd.includes('yarn')) {
-    return new vscode.ThemeIcon('package');
-  } else if (lowerCmd.includes('docker')) {
-    return new vscode.ThemeIcon('server-environment');
-  } else if (lowerCmd.includes('ssh')) {
-    return new vscode.ThemeIcon('remote-explorer');
-  } else if (lowerCmd.includes('cat') || lowerCmd.includes('less') || lowerCmd.includes('more')) {
-    return new vscode.ThemeIcon('file-text');
-  } else if (lowerCmd.includes('rm') || lowerCmd.includes('del')) {
-    return new vscode.ThemeIcon('trash');
-  } else if (lowerCmd.includes('cp') || lowerCmd.includes('copy')) {
-    return new vscode.ThemeIcon('files');
-  } else if (lowerCmd.includes('mv') || lowerCmd.includes('move')) {
-    return new vscode.ThemeIcon('arrow-right');
-  } else if (lowerCmd.includes('mkdir')) {
-    return new vscode.ThemeIcon('new-folder');
-  } else if (lowerCmd.includes('touch') || lowerCmd.includes('new-item')) {
-    return new vscode.ThemeIcon('new-file');
-  } else if (lowerCmd.includes('chmod')) {
-    return new vscode.ThemeIcon('shield');
-  } else if (lowerCmd.includes('ps') || lowerCmd.includes('top')) {
-    return new vscode.ThemeIcon('pulse');
-  } else if (lowerCmd.includes('grep') || lowerCmd.includes('find')) {
-    return new vscode.ThemeIcon('search');
-  } else {
-    return new vscode.ThemeIcon('terminal');
+    // 设置命令相关属性
+    this.setupCommandProperties(commandObj, contextValue, false);
+    
+    // 设置描述 - 根据需要可以设置为 null
+    this.description = null;
   }
 }
 
@@ -187,9 +225,10 @@ function getIconForCommand(command) {
  * 服务器树视图提供者
  */
 class ServerTreeProvider {
-  constructor(servers) {
+  constructor() {
     this._onDidChangeTreeData = new vscode.EventEmitter();
     this.onDidChangeTreeData = this._onDidChangeTreeData.event;
+    this.servers = [];
   }
 
   refresh() {
@@ -202,161 +241,235 @@ class ServerTreeProvider {
 
   getChildren(element) {
     if (!element) {
-      // 根节点：显示所有服务器
-      // 直接从全局变量获取最新的服务器列表
-      const servers = global.servers || [];
-
-      return servers.map(server => {
-        // 将状态设为 Collapsed，使服务器项可展开
-        const treeItem = new vscode.TreeItem(server.name, vscode.TreeItemCollapsibleState.Collapsed);
-        treeItem.tooltip = `${server.configuration.username}@${server.configuration.host}\n\n点击展开服务器详情\n使用右侧按钮连接到服务器`;
-        treeItem.description = `${server.configuration.username}@${server.configuration.host}`;
-        treeItem.contextValue = 'server';
-        treeItem.server = server;
-        treeItem.iconPath = new vscode.ThemeIcon('server');
-        return treeItem;
-      });
+      // 根节点：显示服务器列表
+      return this.getServerItems();
     } else if (element.contextValue === 'server') {
-      // 确保服务器对象有效
-      if (!element.server || !element.server.configuration) {
-        console.error('无效的服务器对象:', element.server);
-        return [];
-      }
-
-      // 服务器节点，返回配置项和自定义命令
-      const server = element.server;
-      const items = [];
-
-      // 配置项组 - 设置为自动展开
-      const configGroup = new vscode.TreeItem('配置信息', vscode.TreeItemCollapsibleState.Expanded);
-      configGroup.iconPath = new vscode.ThemeIcon('gear');
-      configGroup.contextValue = 'config-group';
-      configGroup.server = server;
-      items.push(configGroup);
-
-      // 初始化命令组 - 设置为自动展开
-      if (server.configuration.initCommands && server.configuration.initCommands.length > 0) {
-        const initCommandsGroup = new vscode.TreeItem('初始化命令', vscode.TreeItemCollapsibleState.Expanded);
-        initCommandsGroup.iconPath = new vscode.ThemeIcon('terminal');
-        initCommandsGroup.contextValue = 'init-commands-group';
-        initCommandsGroup.server = server;
-        items.push(initCommandsGroup);
-      }
-
-      // 自定义命令组 - 设置为自动展开
-      if (server.configuration.customCommands && server.configuration.customCommands.length > 0) {
-        const customCommandsGroup = new vscode.TreeItem('自定义命令', vscode.TreeItemCollapsibleState.Expanded);
-        customCommandsGroup.iconPath = new vscode.ThemeIcon('terminal');
-        customCommandsGroup.contextValue = 'custom-commands-group';
-        customCommandsGroup.server = server;
-        items.push(customCommandsGroup);
-      }
-
-      // SMB 映射组 - 设置为自动展开
-      if (server.configuration.smbMapping) {
-        const smbGroup = new vscode.TreeItem('SMB 映射', vscode.TreeItemCollapsibleState.Expanded);
-        smbGroup.iconPath = new vscode.ThemeIcon('folder-opened');
-        smbGroup.contextValue = 'smb-group';
-        smbGroup.server = server;
-        items.push(smbGroup);
-      }
-
-      return items;
+      // 服务器子节点：显示配置、命令等
+      return this.getServerChildItems(element);
     } else if (element.contextValue === 'config-group') {
-      // 配置项组，返回所有配置项
-      const server = element.server;
-
-      // 添加主要配置项
-      const configItems = [
-        { key: 'host', label: '主机', value: server.configuration.host },
-        { key: 'username', label: '用户名', value: server.configuration.username },
-        { key: 'port', label: '端口', value: server.configuration.port || 22 },
-      ];
-
-      // 添加其他配置项
-      if (server.configuration.privateKey) {
-        configItems.push({ key: 'privateKey', label: '私钥', value: server.configuration.privateKey });
-      }
-
-      if (server.configuration.agent) {
-        configItems.push({ key: 'agent', label: '代理', value: '启用' });
-      }
-
-      // 创建配置项树项
-      return configItems.map(item => {
-        const treeItem = new vscode.TreeItem(`${item.label}: ${item.value}`, vscode.TreeItemCollapsibleState.None);
-        treeItem.iconPath = getIconForConfig(item.key);
-        treeItem.contextValue = 'config-item';
-        return treeItem;
-      });
+      // 配置组：显示配置项
+      return this.getConfigItems(element);
     } else if (element.contextValue === 'init-commands-group' || element.contextValue === 'custom-commands-group') {
-      // 命令组，返回所有命令
-      const server = element.server;
-      const commands = element.contextValue === 'init-commands-group'
-        ? server.configuration.initCommands
-        : server.configuration.customCommands;
-
-      return commands.map(cmd => {
-        // 处理命令对象或字符串
-        const isObject = typeof cmd === 'object' && cmd !== null;
-        const commandText = isObject ? cmd.command : cmd;
-        const commandName = isObject ? cmd.name : cmd;
-
-        const treeItem = new vscode.TreeItem(commandName, vscode.TreeItemCollapsibleState.None);
-        treeItem.iconPath = getIconForCommand(commandText);
-        treeItem.contextValue = 'serverCommand';
-
-        // 如果是对象，添加描述
-        if (isObject && cmd.description) {
-          treeItem.description = cmd.description;
-        }
-
-        // 存储命令和服务器信息，以便发送命令时使用
-        treeItem.commandObj = isObject ? cmd : { command: cmd };
-        treeItem.server = server;
-
-        // 标记是否为初始化命令
-        treeItem.isInitCommand = element.contextValue === 'init-commands-group';
-
-        // 设置工具提示
-        treeItem.tooltip = `执行命令: ${commandText}`;
-        if (isObject && cmd.description) {
-          treeItem.tooltip += `\n${cmd.description}`;
-        }
-
-        // 设置点击命令
-        treeItem.command = {
-          command: 'smartssh-smba.sendCommand',
-          title: '发送命令',
-          arguments: [treeItem]
-        };
-
-        return treeItem;
-      });
+      // 命令组：显示命令
+      return this.getCommandItems(element);
     } else if (element.contextValue === 'smb-group') {
-      // SMB 映射组，返回本地路径和远程路径
-      const server = element.server;
-      const smbMapping = server.configuration.smbMapping;
-      const items = [];
+      // SMB 组：显示 SMB 映射
+      return this.getSmbItems(element);
+    } else if (element.contextValue === 'connected-servers-group') {
+      // 已连接服务器组：显示已连接的服务器
+      return this.getConnectedServerItems();
+    }
+    
+    return [];
+  }
 
-      if (smbMapping.localPath) {
-        const localPathItem = new vscode.TreeItem(`本地路径: ${smbMapping.localPath}`, vscode.TreeItemCollapsibleState.None);
-        localPathItem.iconPath = new vscode.ThemeIcon('folder-opened');
-        localPathItem.contextValue = 'smb-local-path';
-        items.push(localPathItem);
-      }
-
-      if (smbMapping.remotePath) {
-        const remotePathItem = new vscode.TreeItem(`远程路径: ${smbMapping.remotePath}`, vscode.TreeItemCollapsibleState.None);
-        remotePathItem.iconPath = new vscode.ThemeIcon('remote');
-        remotePathItem.contextValue = 'smb-remote-path';
-        items.push(remotePathItem);
-      }
-
-      return items;
+  /**
+   * 获取服务器项列表
+   * @returns {Array} - 服务器项列表
+   */
+  getServerItems() {
+    if (!this.servers || this.servers.length === 0) {
+      // 如果没有服务器，显示提示
+      const noServersItem = new vscode.TreeItem('没有配置服务器', vscode.TreeItemCollapsibleState.None);
+      noServersItem.contextValue = 'no-servers';
+      return [noServersItem];
     }
 
-    return [];
+    // 创建服务器树项
+    return this.servers.map(server => {
+      return new ServerTreeItem(
+        server.name,
+        vscode.TreeItemCollapsibleState.Collapsed,
+        server,
+        'server'
+      );
+    });
+  }
+
+  /**
+   * 获取服务器子项列表
+   * @param {Object} element - 服务器元素
+   * @returns {Array} - 服务器子项列表
+   */
+  getServerChildItems(element) {
+    const server = element.server;
+    const items = [];
+
+    // 添加配置组
+    const configGroup = this.createGroupItem('配置', 'config-group', 'settings', server);
+    items.push(configGroup);
+
+    // 添加初始化命令组
+    if (server.configuration.initCommands && server.configuration.initCommands.length > 0) {
+      const initCommandsGroup = this.createGroupItem('初始化命令', 'init-commands-group', 'terminal', server);
+      items.push(initCommandsGroup);
+    }
+
+    // 添加自定义命令组
+    if (server.configuration.customCommands && server.configuration.customCommands.length > 0) {
+      const customCommandsGroup = this.createGroupItem('自定义命令', 'custom-commands-group', 'terminal', server);
+      items.push(customCommandsGroup);
+    }
+
+    // 添加 SMB 映射组
+    if (server.configuration.smbMapping) {
+      const smbGroup = this.createGroupItem('SMB 映射', 'smb-group', 'folder-opened', server);
+      items.push(smbGroup);
+    }
+
+    return items;
+  }
+
+  /**
+   * 创建分组项
+   * @param {string} label - 标签
+   * @param {string} contextValue - 上下文值
+   * @param {string} iconName - 图标名称
+   * @param {Object} server - 服务器对象
+   * @returns {vscode.TreeItem} - 树项
+   */
+  createGroupItem(label, contextValue, iconName, server) {
+    const groupItem = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Expanded);
+    groupItem.iconPath = new vscode.ThemeIcon(iconName);
+    groupItem.contextValue = contextValue;
+    groupItem.server = server;
+    return groupItem;
+  }
+
+  /**
+   * 获取配置项列表
+   * @param {Object} element - 配置组元素
+   * @returns {Array} - 配置项列表
+   */
+  getConfigItems(element) {
+    const server = element.server;
+
+    // 添加主要配置项
+    const configItems = [
+      { key: 'host', label: '主机', value: server.configuration.host },
+      { key: 'username', label: '用户名', value: server.configuration.username },
+      { key: 'port', label: '端口', value: server.configuration.port || 22 },
+    ];
+
+    // 添加其他配置项
+    if (server.configuration.privateKey) {
+      configItems.push({ key: 'privateKey', label: '私钥', value: server.configuration.privateKey });
+    }
+
+    if (server.configuration.agent) {
+      configItems.push({ key: 'agent', label: '代理', value: '启用' });
+    }
+
+    // 创建配置项树项
+    return configItems.map(item => {
+      const treeItem = new vscode.TreeItem(`${item.label}: ${item.value}`, vscode.TreeItemCollapsibleState.None);
+      treeItem.iconPath = getIconForItem(item.key);
+      treeItem.contextValue = 'config-item';
+      return treeItem;
+    });
+  }
+
+  /**
+   * 获取命令项列表
+   * @param {Object} element - 命令组元素
+   * @returns {Array} - 命令项列表
+   */
+  getCommandItems(element) {
+    const server = element.server;
+    const commands = element.contextValue === 'init-commands-group'
+      ? server.configuration.initCommands
+      : server.configuration.customCommands;
+
+    return commands.map(cmd => {
+      // 处理命令对象或字符串
+      const isObject = typeof cmd === 'object' && cmd !== null;
+      const commandName = isObject ? cmd.name : cmd;
+      
+      // 设置上下文值
+      const contextValue = element.contextValue === 'init-commands-group' 
+        ? 'init-command' 
+        : 'server-command';
+      
+      // 创建命令对象
+      const commandObj = isObject 
+        ? { ...cmd, contextValue } 
+        : { command: cmd, contextValue };
+      
+      // 使用 CommandTreeItem 创建命令项
+      const treeItem = new CommandTreeItem(
+        commandName,
+        vscode.TreeItemCollapsibleState.None,
+        commandObj,
+        contextValue,
+        server
+      );
+      
+      // 对于初始化命令和服务器命令，我们不希望点击时自动执行
+      // 而是显示右键菜单
+      treeItem.command = null;
+      
+      return treeItem;
+    });
+  }
+
+  /**
+   * 获取 SMB 项列表
+   * @param {Object} element - SMB 组元素
+   * @returns {Array} - SMB 项列表
+   */
+  getSmbItems(element) {
+    const server = element.server;
+    const smbMapping = server.configuration.smbMapping;
+    const items = [];
+
+    if (smbMapping.localPath) {
+      const localPathItem = new vscode.TreeItem(`本地路径: ${smbMapping.localPath}`, vscode.TreeItemCollapsibleState.None);
+      localPathItem.iconPath = new vscode.ThemeIcon('folder-opened');
+      localPathItem.contextValue = 'smb-local-path';
+      items.push(localPathItem);
+    }
+
+    if (smbMapping.remotePath) {
+      const remotePathItem = new vscode.TreeItem(`远程路径: ${smbMapping.remotePath}`, vscode.TreeItemCollapsibleState.None);
+      remotePathItem.iconPath = new vscode.ThemeIcon('remote');
+      remotePathItem.contextValue = 'smb-remote-path';
+      items.push(remotePathItem);
+    }
+
+    return items;
+  }
+
+  /**
+   * 获取已连接服务器项列表
+   * @returns {Array} - 已连接服务器项列表
+   */
+  getConnectedServerItems() {
+    // 获取全局终端列表
+    const terminals = global.terminals || [];
+    
+    if (terminals.length === 0) {
+      const noTerminalsItem = new vscode.TreeItem('没有活动的 SSH 连接', vscode.TreeItemCollapsibleState.None);
+      noTerminalsItem.contextValue = 'no-terminals';
+      return [noTerminalsItem];
+    }
+    
+    return terminals.map(terminal => {
+      const label = terminal.name;
+      const treeItem = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
+      treeItem.description = `${terminal.username}@${terminal.host}`;
+      treeItem.contextValue = 'connected-server';
+      treeItem.iconPath = new vscode.ThemeIcon('vm-active');
+      treeItem.terminal = terminal.terminal;
+      
+      // 设置点击命令
+      treeItem.command = {
+        command: 'smartssh-smba.showTerminal',
+        title: '显示终端',
+        arguments: [terminal.name]
+      };
+      
+      return treeItem;
+    });
   }
 }
 
@@ -380,41 +493,57 @@ class CommandTreeProvider {
   getChildren(element) {
     if (!element) {
       // 根节点：显示全局命令和工作区组
-      const items = [];
-
-      // 获取配置数据
-      const configData = configLoader.loadConfig();
-
-      // 获取全局命令 - 确保只显示非工作区命令
-      const globalCommands = configData.customCommands.filter(cmd => !cmd.isWorkspaceCommand) || [];
-
-      // 将全局命令直接添加到根节点
-      items.push(...this.createCommandItems(globalCommands, 'global-command'));
-
-      // 获取工作区命令
-      const workspaceCommands = configData.workspaceCommands || [];
-
-      // 如果有工作区命令，添加工作区组
-      if (workspaceCommands.length > 0) {
-        const workspaceName = vscode.workspace.name || '当前工作区';
-        const workspaceCommandsGroup = new vscode.TreeItem(
-          workspaceName,
-          vscode.TreeItemCollapsibleState.Expanded
-        );
-        workspaceCommandsGroup.contextValue = 'workspace-commands-group';
-        workspaceCommandsGroup.iconPath = new vscode.ThemeIcon('folder');
-        items.push(workspaceCommandsGroup);
-      }
-
-      return items;
+      return this.getRootItems();
     } else if (element.contextValue === 'workspace-commands-group') {
       // 工作区命令
-      const configData = configLoader.loadConfig();
-      const workspaceCommands = configData.workspaceCommands || [];
-      return this.createCommandItems(workspaceCommands, 'workspace-command');
+      return this.getWorkspaceCommandItems();
+    }
+    
+    return [];
+  }
+
+  /**
+   * 获取根节点项列表
+   * @returns {Array} - 根节点项列表
+   */
+  getRootItems() {
+    const items = [];
+    
+    // 获取配置数据
+    const configData = configLoader.loadConfig();
+    
+    // 获取全局命令 - 确保只显示非工作区命令
+    const globalCommands = configData.customCommands.filter(cmd => cmd.contextValue !== 'workspace-command') || [];
+    
+    // 将全局命令直接添加到根节点
+    items.push(...this.createCommandItems(globalCommands, 'global-command'));
+    
+    // 获取工作区命令
+    const workspaceCommands = configData.workspaceCommands || [];
+
+    // 如果有工作区命令，添加工作区组
+    if (workspaceCommands.length > 0) {
+      const workspaceName = vscode.workspace.name || '当前工作区';
+      const workspaceCommandsGroup = new vscode.TreeItem(
+        workspaceName,
+        vscode.TreeItemCollapsibleState.Expanded
+      );
+      workspaceCommandsGroup.contextValue = 'workspace-commands-group';
+      workspaceCommandsGroup.iconPath = new vscode.ThemeIcon('folder');
+      items.push(workspaceCommandsGroup);
     }
 
-    return [];
+    return items;
+  }
+
+  /**
+   * 获取工作区命令项列表
+   * @returns {Array} - 工作区命令项列表
+   */
+  getWorkspaceCommandItems() {
+    const configData = configLoader.loadConfig();
+    const workspaceCommands = configData.workspaceCommands || [];
+    return this.createCommandItems(workspaceCommands, 'workspace-command');
   }
 
   /**
@@ -434,80 +563,16 @@ class CommandTreeProvider {
       // 处理命令对象或字符串
       const isObject = typeof cmdObj === 'object' && cmdObj !== null;
       const commandName = isObject ? cmdObj.name : cmdObj;
-      const commandText = isObject ? cmdObj.command : cmdObj;
-
-      // 创建树项
-      const treeItem = new vscode.TreeItem(commandName, vscode.TreeItemCollapsibleState.None);
-
-      // 设置上下文值
-      treeItem.contextValue = contextValue;
-
-      // 设置命令对象
-      treeItem.commandObj = isObject ? cmdObj : { command: cmdObj };
-
-      // 设置服务器
-      treeItem.server = server;
-
-      // 设置描述 - 只显示描述，不显示命令内容
-      if (isObject && cmdObj.description) {
-        treeItem.description = cmdObj.description;
-      }
-
-      // 设置工具提示 - 包含完整信息
-      treeItem.tooltip = `执行命令: ${commandText}`;
-      if (isObject && cmdObj.description) {
-        treeItem.tooltip += `\n${cmdObj.description}`;
-      }
-
-      // 设置图标
-      if (isObject && cmdObj.icon) {
-        treeItem.iconPath = new vscode.ThemeIcon(cmdObj.icon);
-      } else {
-        treeItem.iconPath = getIconForCommand(commandText);
-      }
-
-      // 移除点击命令时的自动执行
-      treeItem.command = undefined;
-
-      return treeItem;
+      
+      // 创建命令树项
+      return new CommandTreeItem(
+        commandName,
+        vscode.TreeItemCollapsibleState.None,
+        isObject ? { ...cmdObj, contextValue } : { command: cmdObj, contextValue },
+        contextValue,
+        server
+      );
     });
-  }
-}
-
-/**
- * 命令树项
- */
-class CommandTreeItem extends vscode.TreeItem {
-  /**
-   * 创建命令树项
-   * @param {Object} commandObj - 命令对象
-   * @param {boolean} isLocal - 是否为工作区
-   * @param {Object} server - 服务器对象
-   */
-  constructor(commandObj, isLocal, server) {
-    super(commandObj.name, vscode.TreeItemCollapsibleState.None);
-
-    this.commandObj = commandObj;
-    this.isLocal = isLocal;
-    this.server = server;
-
-    // 设置上下文
-    this.contextValue = isLocal ? 'workspace-command' : 'global-command';
-
-    // 设置描述
-    if (commandObj.description) {
-      this.description = commandObj.description;
-    } else if (commandObj.workspaceFolder) {
-      this.description = commandObj.workspaceFolder;
-    }
-
-    this.tooltip = `执行命令: ${commandObj.command}`;
-    if (commandObj.description) {
-      this.tooltip += `\n${commandObj.description}`;
-    }
-
-    // 移除点击命令时的自动执行
-    this.command = undefined;
   }
 }
 

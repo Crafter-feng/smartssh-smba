@@ -148,6 +148,18 @@
         "title": "刷新命令列表",
         "icon": "$(refresh)",
         "category": "SmartSSH-SMBA"
+      },
+      {
+        "command": "smartssh-smba.setLogLevel",
+        "title": "SmartSSH-SMBA: 设置日志级别"
+      },
+      {
+        "command": "smartssh-smba.setLogTarget",
+        "title": "SmartSSH-SMBA: 设置日志输出目标"
+      },
+      {
+        "command": "smartssh-smba.toggleLogging",
+        "title": "SmartSSH-SMBA: 切换日志启用/禁用"
       }
     ],
     "configuration": {
@@ -360,8 +372,8 @@
         },
         {
           "command": "smartssh-smba.sendCommand",
-          "when": "view == smartssh-smba-servers && viewItem == serverCommand",
-          "group": "inline"
+          "when": "view == smartssh-smba-servers && (viewItem == init-command || viewItem == server-command)",
+          "group": "inline@1"
         },
         {
           "command": "smartssh-smba.addWorkspaceCommand",
@@ -376,12 +388,17 @@
         {
           "command": "smartssh-smba.sendCommand",
           "when": "view == smartssh-smba-commands && (viewItem == global-command || viewItem == workspace-command)",
-          "group": "inline"
+          "group": "inline@1"
+        },
+        {
+          "command": "smartssh-smba.editCommand",
+          "when": "view == smartssh-smba-commands && (viewItem == global-command || viewItem == workspace-command)",
+          "group": "inline@2"
         },
         {
           "command": "smartssh-smba.deleteCommand",
-          "when": "view == smartssh-smba-commands && viewItem == workspace-command",
-          "group": "inline"
+          "when": "view == smartssh-smba-commands && (viewItem == global-command || viewItem == workspace-command)",
+          "group": "inline@3"
         }
       ]
     }
