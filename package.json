@@ -62,7 +62,7 @@
       },
       {
         "command": "smartssh-smba.sendCommand",
-        "title": "发送",
+        "title": "发送命令",
         "icon": "$(play)",
         "category": "SmartSSH-SMBA"
       },
@@ -86,13 +86,13 @@
       },
       {
         "command": "smartssh-smba.createLocalCommands",
-        "title": "配置本地命令",
+        "title": "配置工作区",
         "icon": "$(settings-gear)",
         "category": "SmartSSH-SMBA"
       },
       {
         "command": "smartssh-smba.deleteLocalCommand",
-        "title": "删除本地命令",
+        "title": "删除工作区",
         "icon": "$(trash)",
         "category": "SmartSSH-SMBA"
       },
@@ -120,9 +120,33 @@
         "category": "SmartSSH-SMBA"
       },
       {
-        "command": "smartssh-smba.openLocalCommandsSettings",
-        "title": "打开本地命令设置",
+        "command": "smartssh-smba.openWorkspaceCommandsSettings",
+        "title": "打开工作区设置",
         "icon": "$(settings-gear)",
+        "category": "SmartSSH-SMBA"
+      },
+      {
+        "command": "smartssh-smba.addGlobalCommand",
+        "title": "添加用户命令",
+        "icon": "$(add)",
+        "category": "SmartSSH-SMBA"
+      },
+      {
+        "command": "smartssh-smba.addWorkspaceCommand",
+        "title": "添加工作区命令",
+        "icon": "$(add)",
+        "category": "SmartSSH-SMBA"
+      },
+      {
+        "command": "smartssh-smba.refreshServerList",
+        "title": "刷新服务器列表",
+        "icon": "$(refresh)",
+        "category": "SmartSSH-SMBA"
+      },
+      {
+        "command": "smartssh-smba.refreshCommandList",
+        "title": "刷新命令列表",
+        "icon": "$(refresh)",
         "category": "SmartSSH-SMBA"
       }
     ],
@@ -205,10 +229,30 @@
                   },
                   "customCommands": {
                     "type": "array",
+                    "default": [],
                     "items": {
-                      "type": "string"
+                      "type": "object",
+                      "required": ["name", "command"],
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "description": "命令显示名称"
+                        },
+                        "command": {
+                          "type": "string",
+                          "description": "要执行的命令"
+                        },
+                        "description": {
+                          "type": "string",
+                          "description": "命令描述"
+                        },
+                        "icon": {
+                          "type": "string",
+                          "description": "命令图标（使用 VS Code 内置图标名称）"
+                        }
+                      }
                     },
-                    "description": "服务器特定的自定义命令"
+                    "description": "自定义命令列表（全局和工作区）"
                   }
                 }
               }
@@ -238,40 +282,14 @@
                   }
                 }
               },
-              "description": "全局自定义命令列表"
+              "description": "自定义命令列表（全局和工作区）"
             },
             "enableLocalCommands": {
               "type": "boolean",
               "default": true,
-              "description": "是否启用本地命令功能（从工作区加载命令）"
+              "description": "是否启用工作区功能（从工作区加载命令）"
             }
           }
-        },
-        "smartssh-smba.localCommands": {
-          "type": "array",
-          "default": [],
-          "items": {
-            "type": "object",
-            "required": ["name", "command"],
-            "properties": {
-              "name": {
-                "type": "string",
-                "description": "命令显示名称"
-              },
-              "command": {
-                "type": "string",
-                "description": "要执行的命令"
-              },
-              "description": {
-                "type": "string",
-                "description": "命令描述"
-              },"icon": {
-                "type": "string",
-                "description": "命令图标（使用 VS Code 内置图标名称）"
-              }
-            }
-          },
-          "description": "本地命令列表，特定于当前工作区"
         }
       }
     },
@@ -299,22 +317,27 @@
     "menus": {
       "view/title": [
         {
-          "command": "smartssh-smba.refreshServers",
-          "when": "view == smartssh-smba-servers",
-          "group": "navigation"
-        },
-        {
           "command": "smartssh-smba.addServer",
           "when": "view == smartssh-smba-servers",
           "group": "navigation"
         },
         {
-          "command": "smartssh-smba.openServerSettings",
+          "command": "smartssh-smba.refreshServerList",
           "when": "view == smartssh-smba-servers",
           "group": "navigation"
         },
         {
-          "command": "smartssh-smba.refreshCommands",
+          "command": "smartssh-smba.addGlobalCommand",
+          "when": "view == smartssh-smba-commands",
+          "group": "navigation"
+        },
+        {
+          "command": "smartssh-smba.refreshCommandList",
+          "when": "view == smartssh-smba-commands",
+          "group": "navigation"
+        },
+        {
+          "command": "smartssh-smba.openSettings",
           "when": "view == smartssh-smba-commands",
           "group": "navigation"
         }
@@ -336,44 +359,28 @@
           "group": "inline"
         },
         {
-          "command": "smartssh-smba.addCommand",
-          "when": "view == smartssh-smba-commands && viewItem == global-commands-group",
+          "command": "smartssh-smba.sendCommand",
+          "when": "view == smartssh-smba-servers && viewItem == serverCommand",
+          "group": "inline"
+        },
+        {
+          "command": "smartssh-smba.addWorkspaceCommand",
+          "when": "view == smartssh-smba-commands && viewItem == workspace-commands-group",
           "group": "inline@1"
         },
         {
-          "command": "smartssh-smba.openSettings",
-          "when": "view == smartssh-smba-commands && viewItem == global-commands-group",
-          "group": "inline@2"
-        },
-        {
-          "command": "smartssh-smba.addCommand",
-          "arguments": [true],
-          "when": "view == smartssh-smba-commands && viewItem == local-commands-group",
-          "group": "inline@1"
-        },
-        {
-          "command": "smartssh-smba.openLocalCommandsSettings",
-          "when": "view == smartssh-smba-commands && viewItem == local-commands-group",
+          "command": "smartssh-smba.openWorkspaceCommandsSettings",
+          "when": "view == smartssh-smba-commands && viewItem == workspace-commands-group",
           "group": "inline@2"
         },
         {
           "command": "smartssh-smba.sendCommand",
-          "when": "view == smartssh-smba-commands && viewItem =~ /-command$/ || view == smartssh-smba-servers && viewItem == serverCommand",
-          "group": "inline"
-        },
-        {
-          "command": "smartssh-smba.editCommand",
-          "when": "view == smartssh-smba-commands && viewItem =~ /Command$/",
+          "when": "view == smartssh-smba-commands && (viewItem == global-command || viewItem == workspace-command)",
           "group": "inline"
         },
         {
           "command": "smartssh-smba.deleteCommand",
-          "when": "view == smartssh-smba-commands && viewItem =~ /Command$/",
-          "group": "inline"
-        },
-        {
-          "command": "smartssh-smba.deleteLocalCommand",
-          "when": "view == smartssh-smba-commands && viewItem == local-command",
+          "when": "view == smartssh-smba-commands && viewItem == workspace-command",
           "group": "inline"
         }
       ]

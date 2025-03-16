@@ -70,9 +70,9 @@ Or you can use extension settings simply add `smartssh-smba.config` directive.
 - `serverList` - 服务器列表
 - `customCommands` - 全局自定义命令
 - `showHostsInPickLists` - 是否在选择列表中显示主机名
-- `enableLocalCommands` - 是否启用本地命令
+- `enableLocalCommands` - 是否启用工作区
 
-本地命令（工作区特定）仍保留在 `smartssh-smba.localCommands` 下。
+工作区（工作区特定）仍保留在 `smartssh-smba.localCommands` 下。
 
 #### smartssh-smba.config
 
@@ -204,7 +204,7 @@ Or you can use extension settings simply add `smartssh-smba.config` directive.
 - Type: `Boolean`
 - Default: `true`
 
-启用或禁用本地命令功能。  
+启用或禁用工作区功能。  
 例如：
 
 ```json
@@ -220,7 +220,7 @@ Or you can use extension settings simply add `smartssh-smba.config` directive.
 - Type: `Array`
 - Default: `[]`
 
-指定工作区特定的本地命令。  
+指定工作区特定的工作区。  
 例如：
 
 ```json

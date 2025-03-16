@@ -20,17 +20,17 @@ class CommandTreeProvider {
 
   getChildren(element) {
     if (!element) {
-      // 根节点：显示全局命令和本地命令
+      // 根节点：显示用户和工作区
       const items = [];
 
-      // 添加全局命令组
+      // 添加用户组
       if (this.globalCommands && this.globalCommands.length > 0) {
-        items.push(new CommandGroup('全局命令', 'globalCommands'));
+        items.push(new CommandGroup('用户', 'globalCommands'));
       }
 
-      // 添加本地命令组
+      // 添加工作区组
       if (this.localCommands && this.localCommands.length > 0) {
-        items.push(new CommandGroup('本地命令', 'localCommands'));
+        items.push(new CommandGroup('工作区', 'localCommands'));
       }
 
       // 添加服务器命令组
@@ -44,10 +44,10 @@ class CommandTreeProvider {
 
       return items;
     } else if (element.contextValue === 'globalCommands') {
-      // 全局命令组：显示所有全局命令
+      // 用户组：显示所有用户
       return this.globalCommands.map(cmd => this.createCommandItem(cmd, 'globalCommand'));
     } else if (element.contextValue === 'localCommands') {
-      // 本地命令组：显示所有本地命令
+      // 工作区组：显示所有工作区
       return this.localCommands.map(cmd => this.createCommandItem(cmd, 'localCommand', null, cmd.workspaceFolder));
     } else if (element.contextValue === 'serverCommands') {
       // 服务器命令组：显示特定服务器的所有命令
@@ -97,10 +97,10 @@ class CommandGroup extends vscode.TreeItem {
       this.tooltip = `${server.name} (${server.configuration.username}@${server.configuration.host})`;
       this.iconPath = new vscode.ThemeIcon('server');
     } else if (contextValue === 'globalCommands') {
-      this.tooltip = '全局命令 - 适用于所有服务器';
+      this.tooltip = '用户 - 适用于所有服务器';
       this.iconPath = new vscode.ThemeIcon('globe');
     } else if (contextValue === 'localCommands') {
-      this.tooltip = '本地命令 - 适用于当前工作区';
+      this.tooltip = '工作区 - 适用于当前工作区';
       this.iconPath = new vscode.ThemeIcon('folder');
     }
   }
