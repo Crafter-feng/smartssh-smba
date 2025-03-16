@@ -35,7 +35,7 @@ class Logger {
   constructor(prefix, outputChannel) {
     this.prefix = prefix || '[SmartSSH-SMBA]';
     this.outputChannel = outputChannel;
-    this.logLevel = LogLevel.DEBUG; // 默认日志级别
+    this.logLevel = LogLevel.INFO; // 默认日志级别
     this.logTarget = LogTarget.BOTH; // 默认输出目标
     this.enabled = true; // 是否启用日志
   }
