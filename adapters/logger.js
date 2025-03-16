@@ -135,13 +135,13 @@ class Logger {
     // 输出到控制台
     if (this.logTarget === LogTarget.CONSOLE || this.logTarget === LogTarget.BOTH) {
       if (level === LogLevel.ERROR) {
-        logger.error(formattedMessage, ...args);
+        console.error(formattedMessage, ...args);
       } else if (level === LogLevel.WARN) {
         console.warn(formattedMessage, ...args);
       } else if (level === LogLevel.INFO) {
         console.info(formattedMessage, ...args);
       } else {
-        logger.info(formattedMessage, ...args);
+        console.info(formattedMessage, ...args);
       }
     }
 

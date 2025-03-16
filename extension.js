@@ -1,6 +1,9 @@
+/* eslint-disable no-useless-escape */
+/* eslint-disable @stylistic/brace-style */
 /* eslint-disable @stylistic/comma-dangle */
 // 'vscode' 模块包含 VS Code 扩展 API
 const vscode = require('vscode');
+const fs = require('fs').promises;
 const commandExistsSync = require('command-exists').sync;
 const configLoader = require('./adapters/config-loader');
 const { ServerTreeProvider, CommandTreeProvider } = require('./src/serverTreeProvider');
@@ -55,6 +58,9 @@ function activate(context) {
     // 设置配置监视器
     setupConfigWatchers(context);
 
+    // 转换远程路径为本地 SMB 路径
+    registerFilePathClickHandler(context);
+
     // 返回扩展 API
     return {
       getTerminals: function () {
@@ -79,9 +85,6 @@ function deactivate() {
  */
 function initExtension() {
   try {
-    // 设置日志级别（可以根据需要调整）
-    logger.setLogLevel(LogLevel.INFO);
-
     // 记录初始化信息
     logger.info('正在初始化扩展...');
 
@@ -133,16 +136,6 @@ function registerCommands(context) {
       })
     );
 
-    // 注册打开 SSH 连接命令的别名
-    context.subscriptions.push(
-      vscode.commands.registerCommand('smartssh-smba.connect', async () => {
-        const serverName = await selectServer();
-        if (serverName) {
-          openSSHConnection(serverName);
-        }
-      })
-    );
-
     // 注册快速打开连接命令
     context.subscriptions.push(
       vscode.commands.registerCommand('smartssh-smba.fastOpenConnection', async () => {
@@ -187,23 +180,9 @@ function registerCommands(context) {
       })
     );
 
-    // 注册刷新服务器列表命令的别名
-    context.subscriptions.push(
-      vscode.commands.registerCommand('smartssh-smba.refreshServers', () => {
-        refreshServerList();
-      })
-    );
-
     // 注册刷新命令列表命令
     context.subscriptions.push(
       vscode.commands.registerCommand('smartssh-smba.refreshCommandList', () => {
-        refreshCommandList();
-      })
-    );
-
-    // 注册刷新命令列表命令的别名
-    context.subscriptions.push(
-      vscode.commands.registerCommand('smartssh-smba.refreshCommands', () => {
         refreshCommandList();
       })
     );
@@ -309,13 +288,6 @@ function registerCommands(context) {
       })
     );
 
-    // 注册打开设置命令的别名
-    context.subscriptions.push(
-      vscode.commands.registerCommand('smartssh-smba.openConfiguration', () => {
-        vscode.commands.executeCommand('workbench.action.openSettings', 'smartssh-smba');
-      })
-    );
-
     // 注册打开工作区设置命令
     context.subscriptions.push(
       vscode.commands.registerCommand('smartssh-smba.openWorkspaceCommandsSettings', () => {
@@ -325,13 +297,6 @@ function registerCommands(context) {
             query: 'smartssh-smba.config',
           }
         );
-      })
-    );
-
-    // 注册打开服务器设置命令
-    context.subscriptions.push(
-      vscode.commands.registerCommand('smartssh-smba.openServerSettings', () => {
-        openServerSettings();
       })
     );
 
@@ -462,7 +427,6 @@ function registerCommands(context) {
         }
       })
     );
-
   } catch (error) {
     logger.error('注册命令时出错', error);
   }
@@ -558,7 +522,6 @@ async function selectServer() {
     // 返回选择的服务器名称
     return selected.label;
   } catch (error) {
-    logger.error('选择服务器时出错:', error);
     logger.error(`选择服务器时出错: ${error.message}`);
     vscode.window.showErrorMessage(`选择服务器时出错: ${error.message}`);
     return null;
@@ -598,7 +561,6 @@ function loadServerList() {
 
     logger.info(`服务器列表已加载，共 ${servers.length} 个服务器`);
   } catch (error) {
-    logger.error('加载服务器列表时出错:', error);
     logger.error(`加载服务器列表时出错: ${error.message}`);
   }
 }
@@ -623,7 +585,6 @@ function updateTreeProviders() {
       logger.info('命令树视图已更新');
     }
   } catch (error) {
-    logger.error('更新树视图提供者时出错:', error);
     logger.error(`更新树视图提供者时出错: ${error.message}`);
   }
 }
@@ -1059,7 +1020,6 @@ function updateStatusBarButton() {
     // 始终显示按钮
     fastOpenConnectionButton.show();
   } catch (error) {
-    logger.error('更新状态栏按钮时出错:', error);
     logger.error(`更新状态栏按钮时出错: ${error.message}`);
     logger.error(`错误堆栈: ${error.stack}`);
   }
@@ -1768,24 +1728,6 @@ async function editCommand(cmdObj) {
 }
 
 /**
- * 打开服务器设置
- */
-function openServerSettings() {
-  try {
-    // 打开设置页面，并聚焦到 smartssh-smba.config.serverList 设置
-    vscode.commands.executeCommand(
-      'workbench.action.openSettings',
-      'smartssh-smba.config.serverList'
-    );
-
-    logger.info('已打开服务器设置页面');
-  } catch (error) {
-    logger.error('打开服务器设置页面时出错', error);
-    vscode.window.showErrorMessage(`打开服务器设置页面时出错: ${error.message}`);
-  }
-}
-
-/**
  * 发送命令
  * @param {Object} item - 命令项
  */
@@ -1937,7 +1879,7 @@ async function sendCommand(item) {
             // 发送命令到新终端
             newTerminal.terminal.show();
             newTerminal.terminal.sendText(commandText);
-            logger.info(`已发送命令到服务器 ${serverName}: ${commandText}`)
+            logger.info(`已发送命令到服务器 ${serverName}: ${commandText}`);
           } else {
             logger.error(`无法找到服务器 ${serverName} 的终端`);
             vscode.window.showErrorMessage(`无法找到服务器 ${serverName} 的终端`);
@@ -2123,6 +2065,426 @@ function getRemotePathFromSmbMapping(serverConfig) {
   // 如果不在 SMB 路径中，则返回默认远程路径
   logger.warn('无法映射工作区路径 ' + currentWorkspacePath + ' 到远程路径');
   return serverConfig.smbMapping.remotePath;
+}
+
+/**
+ * 转换远程路径为本地 SMB 路径
+ * @param {string} remotePath - 远程路径
+ * @param {Object} server - 服务器配置
+ * @returns {string|null} - 转换后的本地路径，如果无法转换则返回 null
+ */
+function convertRemotePathToLocal(remotePath, server) {
+  if (!server || !server.configuration || !server.configuration.smbMapping) {
+    return null;
+  }
+
+  const { remotePath: remoteBase, localPath: localBase } = server.configuration.smbMapping;
+
+  if (!remoteBase || !localBase) {
+    return null;
+  }
+
+  // 检查远程路径是否以远程基础路径开头
+  if (remotePath.startsWith(remoteBase)) {
+    // 替换远程基础路径为本地基础路径
+    return remotePath.replace(remoteBase, localBase);
+  }
+
+  return null;
+}
+
+/**
+ * 检查文件或文件夹是否存在
+ * @param {string} path - 要检查的路径
+ * @returns {Promise<{exists: boolean, isDirectory: boolean}>} - 存在性和类型信息
+ */
+async function checkPathExists(path) {
+  try {
+    const stats = await fs.stat(path);
+    return {
+      exists: true,
+      isDirectory: stats.isDirectory()
+    };
+  } catch (error) {
+    return {
+      exists: false,
+      isDirectory: false
+    };
+  }
+}
+
+/**
+ * 注册文件路径点击处理器
+ * @param {vscode.ExtensionContext} context - 扩展上下文
+ */
+function registerFilePathClickHandler(context) {
+  // 注册命令以打开转换后的文件路径
+  const disposable = vscode.commands.registerCommand('smartssh-smba.openMappedFile', async (filePath, serverName) => {
+    try {
+      logger.info(`尝试打开映射文件: ${filePath}`);
+
+      // 确定要使用的服务器
+      let server = null;
+
+      // 如果提供了服务器名称，直接使用
+      if (serverName) {
+        server = servers.find(s => s.name === serverName);
+      } else {
+        // 否则尝试从活动终端获取
+        const activeTerminal = vscode.window.activeTerminal ? terminals.find(t => t.terminal === vscode.window.activeTerminal) : null;
+        if (activeTerminal) {
+          server = servers.find(s => s.name === activeTerminal.name);
+        }
+      }
+
+      if (!server) {
+        logger.warn('没有活动的服务器连接');
+        return;
+      }
+
+      // 转换路径
+      const localPath = convertRemotePathToLocal(filePath, server);
+      if (!localPath) {
+        logger.warn(`无法转换路径: ${filePath}`);
+        return;
+      }
+
+      // 检查文件是否存在
+      const { exists, isDirectory } = await checkPathExists(localPath);
+
+      if (!exists) {
+        // 文件不存在时，直接不处理
+        logger.warn(`文件不存在: ${localPath}`);
+        return;
+      }
+
+      // 根据路径类型执行不同操作
+      if (isDirectory) {
+        // 如果是目录，尝试在 VS Code 中打开
+        logger.info(`打开文件夹: ${localPath}`);
+
+        // 检查是否是工作区的文件夹
+        const workspaceFolders = vscode.workspace.workspaceFolders || [];
+        const path = require('path');
+        const isWorkspaceFolder = workspaceFolders.some(folder => {
+          const folderPath = folder.uri.fsPath;
+          return localPath === folderPath || localPath.startsWith(folderPath + path.sep);
+        });
+
+        if (isWorkspaceFolder) {
+          // 如果是工作区文件夹，使用 VS Code 的 explorer.reveal 命令
+          const uri = vscode.Uri.file(localPath);
+          await vscode.commands.executeCommand('revealInExplorer', uri);
+        } else {
+          // 如果不是工作区文件夹，尝试添加到工作区
+          const uri = vscode.Uri.file(localPath);
+          const openInNewWindow = await vscode.window.showQuickPick(
+            ['在当前窗口打开', '在新窗口打开', '添加到工作区', '在文件浏览器中打开'],
+            { placeHolder: '如何打开文件夹?' }
+          );
+
+          if (openInNewWindow === '在新窗口打开') {
+            await vscode.commands.executeCommand('vscode.openFolder', uri, true);
+          } else if (openInNewWindow === '在当前窗口打开') {
+            await vscode.commands.executeCommand('vscode.openFolder', uri, false);
+          } else if (openInNewWindow === '添加到工作区') {
+            await vscode.workspace.updateWorkspaceFolders(
+              workspaceFolders.length,
+              null,
+              { uri }
+            );
+          } else if (openInNewWindow === '在文件浏览器中打开') {
+            await vscode.commands.executeCommand('revealFileInOS', uri);
+          }
+        }
+      } else {
+        // 如果是文件，打开文件
+        logger.info(`打开文件: ${localPath}`);
+        try {
+          const document = await vscode.workspace.openTextDocument(localPath);
+          await vscode.window.showTextDocument(document);
+        } catch (error) {
+          // 如果是二进制文件或其他无法用文本编辑器打开的文件，尝试用系统默认程序打开
+          logger.warn(`无法在编辑器中打开文件: ${error.message}，尝试用系统默认程序打开`);
+          const uri = vscode.Uri.file(localPath);
+          await vscode.commands.executeCommand('revealFileInOS', uri);
+        }
+      }
+    } catch (error) {
+      logger.error(`打开映射文件时出错: ${error.message}`);
+      vscode.window.showErrorMessage(`打开文件时出错: ${error.message}`);
+    }
+  });
+
+  context.subscriptions.push(disposable);
+
+  // 注册终端链接处理器
+  const termLinkProvider = vscode.window.registerTerminalLinkProvider({
+    provideTerminalLinks: (context, token) => {
+      const links = [];
+
+      // 获取当前活动终端对应的服务器
+      const activeTerminal = vscode.window.activeTerminal ? terminals.find(t => t.terminal === vscode.window.activeTerminal) : null;
+
+      // 如果没有活动终端，不提供链接
+      if (!activeTerminal) {
+        return links;
+      }
+
+      // 获取活动终端对应的服务器
+      const activeServer = servers.find(s => s.name === activeTerminal.name);
+
+      // 如果没有找到对应的服务器或服务器没有配置 SMB 映射，不提供链接
+      if (!activeServer || !activeServer.configuration || !activeServer.configuration.smbMapping || !activeServer.configuration.smbMapping.remotePath) {
+        return links;
+      }
+
+      // 获取远程路径前缀
+      const prefix = activeServer.configuration.smbMapping.remotePath;
+
+      // 多步骤匹配策略
+      // 步骤1: 尝试找出所有可能的路径
+      const potentialPaths = findPotentialPaths(context.line, prefix);
+
+      // 步骤2: 处理每个潜在路径
+      for (const pathInfo of potentialPaths) {
+        links.push({
+          startIndex: pathInfo.startIndex,
+          length: pathInfo.length,
+          tooltip: `服务器(${activeServer.name})：点击打开 `,
+          data: {
+            filePath: pathInfo.path,
+            line: pathInfo.line,
+            column: pathInfo.column,
+            serverName: activeServer.name
+          }
+        });
+      }
+
+      return links;
+    },
+    handleTerminalLink: link => {
+      const { filePath, line, column, serverName } = link.data;
+
+      // 调用我们的命令来处理路径转换和文件打开
+      vscode.commands.executeCommand('smartssh-smba.openMappedFile', filePath, serverName)
+        .then(() => {
+          // 如果有行号和列号，移动光标到指定位置
+          if (line !== undefined && vscode.window.activeTextEditor) {
+            const position = new vscode.Position(line, column || 0);
+            const selection = new vscode.Selection(position, position);
+
+            vscode.window.activeTextEditor.selection = selection;
+            vscode.window.activeTextEditor.revealRange(
+              new vscode.Range(position, position),
+              vscode.TextEditorRevealType.InCenter
+            );
+          }
+        })
+        .catch(error => {
+          logger.error(`处理终端链接时出错: ${error.message}`);
+        });
+    }
+  });
+
+  context.subscriptions.push(termLinkProvider);
+}
+
+/**
+ * 在文本中查找所有路径（包括特定前缀路径和通用路径）
+ * @param {string} text - 要搜索的文本
+ * @param {string} [prefix] - 可选的远程路径前缀
+ * @returns {Array} - 找到的路径信息数组
+ */
+function findPotentialPaths(text, prefix = null) {
+  const results = [];
+
+  try {
+    // 记录调试信息
+    logger.debug(`查找路径，文本长度: ${text.length}, 前缀: ${prefix || '无'}`);
+
+    // 步骤1: 将文本按空白字符和常见分隔符分割成多个部分
+    const parts = text.split(/[\s:"'<>|,;()[\]{}]/);
+
+    // 步骤2: 遍历每个部分，查找路径
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i].trim();
+
+      // 跳过空部分
+      if (!part) continue;
+
+      // 检查是否是路径
+      let isPath = false;
+      let pathStart = 0;
+
+      // 如果提供了前缀，先检查是否包含前缀
+      if (prefix && part.includes(prefix)) {
+        isPath = true;
+        pathStart = part.indexOf(prefix);
+      }
+      // 否则检查是否是通用 Unix 路径（以 / 开头，包含至少一个额外的路径段）
+      else if (part.startsWith('/') && part.includes('/', 1)) {
+        isPath = true;
+        pathStart = 0;
+      }
+
+      if (!isPath) continue;
+
+      // 提取路径
+      let path = part.substring(pathStart);
+
+      // 清理路径
+      path = cleanupPath(path);
+
+      // 如果是前缀路径，确保路径至少包含前缀和一个额外的路径段
+      if (prefix && path.startsWith(prefix) &&
+        (path.length <= prefix.length || !path.includes('/', prefix.length))) {
+        continue;
+      }
+
+      // 计算在原始文本中的位置
+      const startIndex = text.indexOf(path);
+      if (startIndex === -1) continue;
+
+      // 检查是否有行列号
+      let line = undefined;
+      let column = undefined;
+      let endIndex = startIndex + path.length;
+
+      // 查找行列号
+      if (endIndex < text.length) {
+        const afterPath = text.substring(endIndex);
+        const lineColMatch = afterPath.match(/^:(\d+)(?::(\d+))?/);
+
+        if (lineColMatch) {
+          line = parseInt(lineColMatch[1]) - 1;
+          if (lineColMatch[2]) {
+            column = parseInt(lineColMatch[2]) - 1;
+          }
+
+          // 调整匹配长度以包含行列号
+          endIndex += lineColMatch[0].length;
+        }
+      }
+
+      // 添加到结果（避免重复）
+      const isDuplicate = results.some(r => r.path === path);
+      if (!isDuplicate) {
+        results.push({
+          path: path,
+          startIndex: startIndex,
+          length: endIndex - startIndex,
+          line: line,
+          column: column,
+          isPrefixPath: prefix && path.startsWith(prefix)
+        });
+
+        logger.debug(`找到路径: ${path}, 位置: ${startIndex}-${endIndex}`);
+      }
+    }
+
+    // 步骤3: 如果上述方法没有找到路径，尝试使用正则表达式
+    if (results.length === 0) {
+      logger.debug('使用分割方法未找到路径，尝试使用正则表达式');
+
+      // 创建正则表达式列表
+      const regexList = [];
+
+      // 如果有前缀，添加前缀路径正则表达式
+      if (prefix) {
+        const escapedPrefix = escapeRegExp(prefix);
+        regexList.push(new RegExp(`(${escapedPrefix}[^\\s:"'<>|,;()\\[\\]{}]*)`, 'g'));
+      }
+
+      // 添加通用 Unix 路径正则表达式
+      regexList.push(/\/([\w\-\.]+\/)+[\w\-\._]*/g);
+
+      // 遍历每个正则表达式
+      for (const regex of regexList) {
+        let match;
+
+        while ((match = regex.exec(text)) !== null) {
+          let path = match[0];
+
+          // 清理路径
+          path = cleanupPath(path);
+
+          // 如果是前缀路径，确保路径至少包含前缀和一个额外的路径段
+          if (prefix && path.startsWith(prefix) &&
+            (path.length <= prefix.length || !path.includes('/', prefix.length))) {
+            continue;
+          }
+
+          const startIndex = match.index;
+          let endIndex = startIndex + path.length;
+
+          // 检查是否有行列号
+          let line = undefined;
+          let column = undefined;
+
+          if (endIndex < text.length) {
+            const afterPath = text.substring(endIndex);
+            const lineColMatch = afterPath.match(/^:(\d+)(?::(\d+))?/);
+
+            if (lineColMatch) {
+              line = parseInt(lineColMatch[1]) - 1;
+              if (lineColMatch[2]) {
+                column = parseInt(lineColMatch[2]) - 1;
+              }
+
+              // 调整匹配长度以包含行列号
+              endIndex += lineColMatch[0].length;
+            }
+          }
+
+          // 添加到结果（避免重复）
+          const isDuplicate = results.some(r => r.path === path);
+          if (!isDuplicate) {
+            results.push({
+              path: path,
+              startIndex: startIndex,
+              length: endIndex - startIndex,
+              line: line,
+              column: column,
+              isPrefixPath: prefix && path.startsWith(prefix)
+            });
+
+            logger.debug(`使用正则表达式找到路径: ${path}, 位置: ${startIndex}-${endIndex}`);
+          }
+        }
+      }
+    }
+  } catch (error) {
+    logger.error(`查找路径时出错: ${error.message}`);
+  }
+
+  return results;
+}
+
+/**
+ * 清理路径，移除尾部的标点符号等
+ * @param {string} path - 要清理的路径
+ * @returns {string} - 清理后的路径
+ */
+function cleanupPath(path) {
+  // 移除尾部的标点符号
+  path = path.replace(/[.,;:'"!?]+$/, '');
+
+  // 确保路径不以 / 结尾
+  if (path.endsWith('/')) {
+    path = path.slice(0, -1);
+  }
+
+  return path;
+}
+
+/**
+ * 转义正则表达式特殊字符
+ * @param {string} string - 要转义的字符串
+ * @returns {string} - 转义后的字符串
+ */
+function escapeRegExp(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 // 导出激活和停用函数

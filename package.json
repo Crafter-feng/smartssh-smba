@@ -37,18 +37,6 @@
         "category": "SmartSSH-SMBA"
       },
       {
-        "command": "smartssh-smba.refreshServers",
-        "title": "刷新服务器列表",
-        "icon": "$(refresh)",
-        "category": "SmartSSH-SMBA"
-      },
-      {
-        "command": "smartssh-smba.refreshCommands",
-        "title": "刷新命令列表",
-        "icon": "$(refresh)",
-        "category": "SmartSSH-SMBA"
-      },
-      {
         "command": "smartssh-smba.addServer",
         "title": "添加服务器",
         "icon": "$(add)",
@@ -56,7 +44,7 @@
       },
       {
         "command": "smartssh-smba.connectToServer",
-        "title": "连接",
+        "title": "连接到服务器",
         "icon": "$(plug)",
         "category": "SmartSSH-SMBA"
       },
@@ -74,13 +62,13 @@
       },
       {
         "command": "smartssh-smba.editCommand",
-        "title": "编辑",
+        "title": "编辑命令",
         "icon": "$(edit)",
         "category": "SmartSSH-SMBA"
       },
       {
         "command": "smartssh-smba.deleteCommand",
-        "title": "删除",
+        "title": "删除命令",
         "icon": "$(trash)",
         "category": "SmartSSH-SMBA"
       },
@@ -97,25 +85,19 @@
         "category": "SmartSSH-SMBA"
       },
       {
-        "command": "smartssh-smba.openServerSettings",
-        "title": "打开服务器设置",
-        "icon": "$(settings-gear)",
-        "category": "SmartSSH-SMBA"
-      },
-      {
         "command": "smartssh-smba.fastOpenConnection",
         "title": "快速打开SSH连接",
         "category": "SmartSSH-SMBA"
       },
       {
         "command": "smartssh-smba.editServer",
-        "title": "编辑",
+        "title": "编辑服务器",
         "icon": "$(edit)",
         "category": "SmartSSH-SMBA"
       },
       {
         "command": "smartssh-smba.deleteServer",
-        "title": "删除",
+        "title": "删除服务器",
         "icon": "$(trash)",
         "category": "SmartSSH-SMBA"
       },
@@ -159,7 +141,7 @@
       },
       {
         "command": "smartssh-smba.toggleLogging",
-        "title": "SmartSSH-SMBA: 切换日志启用/禁用"
+        "title": "SmartSSH-SMBA: 设置切换日志启用/禁用"
       }
     ],
     "configuration": {
@@ -336,7 +318,7 @@
         {
           "command": "smartssh-smba.refreshServerList",
           "when": "view == smartssh-smba-servers",
-          "group": "navigation"
+          "group": "navigation@1"
         },
         {
           "command": "smartssh-smba.addGlobalCommand",
@@ -350,7 +332,7 @@
         },
         {
           "command": "smartssh-smba.openSettings",
-          "when": "view == smartssh-smba-commands",
+          "when": "view == smartssh-smba-commands || view == smartssh-smba-servers",
           "group": "navigation"
         }
       ],
