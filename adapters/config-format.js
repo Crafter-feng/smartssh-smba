@@ -15,22 +15,33 @@ var format = function (element) {
     smbMappingList: [] // 初始化为空数组
   };
 
+  // 保存已添加路径的映射，防止重复
+  const addedMappings = new Set();
+
   // 合并 smbMapping 到 smbMappingList
   if (element.smbMapping && (element.smbMapping.localPath || element.smbMapping.remotePath)) {
-    config.smbMappingList.push({
-      localPath: element.smbMapping.localPath,
-      remotePath: element.smbMapping.remotePath
-    });
+    const mappingKey = `${element.smbMapping.localPath || ''}:${element.smbMapping.remotePath || ''}`;
+    if (!addedMappings.has(mappingKey)) {
+      config.smbMappingList.push({
+        localPath: element.smbMapping.localPath,
+        remotePath: element.smbMapping.remotePath
+      });
+      addedMappings.add(mappingKey);
+    }
   }
 
   // 添加新的 smbMappingList
   if (element.smbMappingList && Array.isArray(element.smbMappingList)) {
     element.smbMappingList.forEach(mapping => {
       if (mapping && (mapping.localPath || mapping.remotePath)) {
-        config.smbMappingList.push({
-          localPath: mapping.localPath,
-          remotePath: mapping.remotePath
-        });
+        const mappingKey = `${mapping.localPath || ''}:${mapping.remotePath || ''}`;
+        if (!addedMappings.has(mappingKey)) {
+          config.smbMappingList.push({
+            localPath: mapping.localPath,
+            remotePath: mapping.remotePath
+          });
+          addedMappings.add(mappingKey);
+        }
       }
     });
   }

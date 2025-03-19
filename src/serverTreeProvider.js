@@ -255,12 +255,28 @@ class ServerTreeProvider {
     } else if (element.contextValue === 'smb-group') {
       // SMB 组：显示 SMB 映射
       return this.getSmbItems(element);
+    } else if (element.contextValue === 'smb-mapping') {
+      // 单个 SMB 映射：显示本地路径和远程路径
+      return this.getSmbMappingDetails(element);
     } else if (element.contextValue === 'connected-servers-group') {
       // 已连接服务器组：显示已连接的服务器
       return this.getConnectedServerItems();
     }
 
     return [];
+  }
+
+  /**
+   * 获取单个 SMB 映射的详细信息
+   * @param {Object} element - 映射元素
+   * @returns {Array} - 路径树项列表
+   */
+  getSmbMappingDetails(element) {
+    if (!element.mapping) {
+      return [];
+    }
+    
+    return this.createMappingPathItems(element.mapping);
   }
 
   /**
@@ -419,42 +435,137 @@ class ServerTreeProvider {
    */
   getSmbItems(element) {
     const server = element.server;
+    
+    // 检查服务器配置中是否有SMB映射列表
+    if (!server.configuration.smbMappingList || !Array.isArray(server.configuration.smbMappingList)) {
+      return [this.createNoMappingItem('没有配置 SMB 映射')];
+    }
+    
+    // 过滤有效的映射（至少有本地路径或远程路径）
+    const validMappings = server.configuration.smbMappingList.filter(
+      mapping => mapping && (mapping.localPath || mapping.remotePath)
+    );
+    
+    if (validMappings.length === 0) {
+      return [this.createNoMappingItem('没有有效的 SMB 映射')];
+    }
+    
+    // 创建映射组和子项
+    return this.createSmbMappingGroups(validMappings);
+  }
+
+  /**
+   * 创建"无映射"提示项
+   * @param {string} message - 显示消息
+   * @returns {vscode.TreeItem} - 树项
+   */
+  createNoMappingItem(message) {
+    const noMappingItem = new vscode.TreeItem(message, vscode.TreeItemCollapsibleState.None);
+    noMappingItem.contextValue = 'no-smb-mapping';
+    return noMappingItem;
+  }
+
+  /**
+   * 创建SMB映射组
+   * @param {Array} mappings - 映射列表
+   * @returns {Array} - SMB映射树项列表
+   */
+  createSmbMappingGroups(mappings) {
     const items = [];
-
-    // 只处理 smbMappingList 配置
-    if (server.configuration.smbMappingList && server.configuration.smbMappingList.length > 0) {
-      server.configuration.smbMappingList.forEach((mapping, index) => {
-        if (mapping.localPath || mapping.remotePath) {
-          const mappingItem = new vscode.TreeItem(`映射 ${index + 1}`, vscode.TreeItemCollapsibleState.Expanded);
-          mappingItem.contextValue = 'smb-mapping';
-          mappingItem.iconPath = new vscode.ThemeIcon('link');
-          items.push(mappingItem);
-
-          if (mapping.localPath) {
-            const localPathItem = new vscode.TreeItem(`本地路径: ${mapping.localPath}`, vscode.TreeItemCollapsibleState.None);
-            localPathItem.iconPath = new vscode.ThemeIcon('folder-opened');
-            localPathItem.contextValue = 'smb-local-path';
-            items.push(localPathItem);
-          }
-
-          if (mapping.remotePath) {
-            const remotePathItem = new vscode.TreeItem(`远程路径: ${mapping.remotePath}`, vscode.TreeItemCollapsibleState.None);
-            remotePathItem.iconPath = new vscode.ThemeIcon('remote');
-            remotePathItem.contextValue = 'smb-remote-path';
-            items.push(remotePathItem);
-          }
-        }
-      });
-    }
-
-    // 如果没有任何有效的映射配置，显示提示信息
-    if (items.length === 0) {
-      const noMappingItem = new vscode.TreeItem('没有配置 SMB 映射', vscode.TreeItemCollapsibleState.None);
-      noMappingItem.contextValue = 'no-smb-mapping';
-      items.push(noMappingItem);
-    }
-
+    
+    mappings.forEach((mapping, index) => {
+      // 创建映射组标题
+      const groupTitle = this.formatMappingTitle(mapping, index);
+      const groupItem = new vscode.TreeItem(groupTitle, vscode.TreeItemCollapsibleState.Collapsed);
+      groupItem.contextValue = 'smb-mapping';
+      groupItem.iconPath = new vscode.ThemeIcon('link');
+      groupItem.mapping = mapping; // 存储映射数据供上下文菜单使用
+      
+      // 添加映射组到结果列表
+      items.push(groupItem);
+      
+      // 添加路径子项
+      items.push(...this.createMappingPathItems(mapping));
+    });
+    
     return items;
+  }
+
+  /**
+   * 格式化映射标题
+   * @param {Object} mapping - 映射对象
+   * @param {number} index - 映射索引
+   * @returns {string} - 格式化的标题
+   */
+  formatMappingTitle(mapping, index) {
+    // 如果有描述，则包含在标题中
+    return mapping.description 
+      ? `映射 ${index + 1} (${mapping.description})` 
+      : `映射 ${index + 1}`;
+  }
+
+  /**
+   * 创建映射路径项
+   * @param {Object} mapping - 映射对象
+   * @returns {Array} - 路径树项列表
+   */
+  createMappingPathItems(mapping) {
+    const pathItems = [];
+    
+    // 添加本地路径项（如果存在）
+    if (mapping.localPath) {
+      pathItems.push(this.createPathItem(
+        'local', 
+        mapping.localPath, 
+        'folder-opened', 
+        mapping
+      ));
+    }
+    
+    // 添加远程路径项（如果存在）
+    if (mapping.remotePath) {
+      pathItems.push(this.createPathItem(
+        'remote', 
+        mapping.remotePath, 
+        'remote', 
+        mapping
+      ));
+    }
+    
+    return pathItems;
+  }
+
+  /**
+   * 创建路径项
+   * @param {string} type - 路径类型 ('local' 或 'remote')
+   * @param {string} path - 路径值
+   * @param {string} iconName - 图标名称
+   * @param {Object} mapping - 映射对象
+   * @returns {vscode.TreeItem} - 路径树项
+   */
+  createPathItem(type, path, iconName, mapping) {
+    const isLocal = type === 'local';
+    const label = isLocal ? `本地路径: ${path}` : `远程路径: ${path}`;
+    
+    const pathItem = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
+    pathItem.iconPath = new vscode.ThemeIcon(iconName);
+    pathItem.contextValue = isLocal ? 'smb-local-path' : 'smb-remote-path';
+    pathItem.mapping = mapping; // 存储映射数据供上下文菜单使用
+    pathItem.path = path; // 存储实际路径
+    
+    // 添加工具提示
+    pathItem.tooltip = isLocal 
+      ? `映射的本地路径: ${path}` 
+      : `映射的远程路径: ${path}`;
+      
+    // 为路径项添加点击操作（可以打开路径或复制路径）
+    pathItem.command = {
+      command: isLocal ? 'smartssh-smba.openLocalPath' : 'smartssh-smba.copyRemotePath',
+      title: isLocal ? '打开本地路径' : '复制远程路径',
+      arguments: [path]
+    };
+    
+    return pathItem;
   }
 
   /**

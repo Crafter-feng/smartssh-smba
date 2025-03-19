@@ -2093,8 +2093,11 @@ function getRemotePathFromSmbMapping(serverConfig) {
       }
 
       // 如果所有映射都不匹配，使用第一个映射的远程路径作为默认值
-      logger.warn('无法映射工作区路径 ' + currentWorkspacePath + ' 到远程路径');
-      return serverConfig.smbMappingList[0].remotePath;
+      // 添加检查确保第一个映射有远程路径
+      if (serverConfig.smbMappingList[0] && serverConfig.smbMappingList[0].remotePath) {
+        logger.warn('无法映射工作区路径 ' + currentWorkspacePath + ' 到远程路径，使用默认远程路径');
+        return serverConfig.smbMappingList[0].remotePath;
+      }
     }
 
     // 如果没有配置路径映射，但有配置路径，则使用配置的路径
