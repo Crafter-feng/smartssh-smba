@@ -767,15 +767,13 @@ function buildSSHCommand(config) {
       }
     }
 
-    remoteCommands.push(`eval $(echo '$SHELL')`);
+    remoteCommands.push(`eval $(echo '$SHELL') --login`);
 
     // 构建命令字符串，每个命令后面加分号
     const commandString = remoteCommands.map(cmd => `${cmd};`).join(' ');
-
+    args.push('-t');
     // 添加 shell 启动命令，确保交互式 shell
     args.push(`"${commandString}"`);
-
-    args.push('--login');
 
     return {
       command: command,
@@ -1051,33 +1049,49 @@ function findServerForPath(filePath) {
     for (const server of servers) {
       logger.trace(`检查服务器: ${server.name}`);
 
-      // 检查服务器是否有路径映射
-      if (!server.configuration.pathMappings || server.configuration.pathMappings.length === 0) {
-        logger.trace(`服务器 ${server.name} 没有路径映射`);
-        continue;
-      }
+      // 首先检查 pathMappings 配置
+      if (server.configuration.pathMappings && server.configuration.pathMappings.length > 0) {
+        // 检查每个路径映射
+        for (const mapping of server.configuration.pathMappings) {
+          logger.trace(`检查路径映射: ${JSON.stringify(mapping)}`);
 
-      // 检查每个路径映射
-      for (const mapping of server.configuration.pathMappings) {
-        logger.trace(`检查路径映射: ${JSON.stringify(mapping)}`);
+          // 检查本地路径是否配置
+          if (mapping.localPath) {
+            // 规范化本地路径并转为小写
+            const localPath = mapping.localPath.replace(/\\/g, '/').toLowerCase();
+            logger.debug(`服务器 ${server.name} 的本地路径: ${localPath}`);
 
-        // 检查本地路径是否配置
-        if (mapping.localPath) {
-          // 规范化本地路径并转为小写
-          const localPath = mapping.localPath.replace(/\\/g, '/').toLowerCase();
-          logger.debug(`服务器 ${server.name} 的本地路径: ${localPath}`);
+            // 检查文件路径是否以本地路径开头
+            if (normalizedPath.startsWith(localPath)) {
+              const matchLength = localPath.length;
+              logger.debug(`找到匹配，长度: ${matchLength}`);
 
-          // 检查文件路径是否以本地路径开头
-          if (normalizedPath.startsWith(localPath)) {
-            const matchLength = localPath.length;
-            logger.debug(`找到匹配，长度: ${matchLength}`);
-
-            // 如果这是最长匹配，更新最佳匹配
-            if (matchLength > bestMatchLength) {
-              bestMatch = server;
-              bestMatchLength = matchLength;
-              logger.debug(`更新最佳匹配为: ${server.name}`);
+              // 如果这是最长匹配，更新最佳匹配
+              if (matchLength > bestMatchLength) {
+                bestMatch = server;
+                bestMatchLength = matchLength;
+                logger.debug(`更新最佳匹配为: ${server.name}`);
+              }
             }
+          }
+        }
+      }
+      // 向后兼容：检查旧的 smbMapping 配置
+      else if (server.configuration.smbMapping && server.configuration.smbMapping.localPath) {
+        // 规范化本地路径并转为小写
+        const localPath = server.configuration.smbMapping.localPath.replace(/\\/g, '/').toLowerCase();
+        logger.debug(`服务器 ${server.name} 的旧式 SMB 本地路径: ${localPath}`);
+
+        // 检查文件路径是否以本地路径开头
+        if (normalizedPath.startsWith(localPath)) {
+          const matchLength = localPath.length;
+          logger.debug(`找到旧式 SMB 匹配，长度: ${matchLength}`);
+
+          // 如果这是最长匹配，更新最佳匹配
+          if (matchLength > bestMatchLength) {
+            bestMatch = server;
+            bestMatchLength = matchLength;
+            logger.debug(`更新最佳匹配为: ${server.name}`);
           }
         }
       }
@@ -1987,84 +2001,191 @@ function findOrCreateLocalTerminal() {
  * @returns {string|null} - 远程路径或 null
  */
 function getRemotePathFromSmbMapping(serverConfig) {
-  // 如果未配置 SMB 映射，则返回 null
-  if (!serverConfig.smbMapping) {
-    return null;
-  }
+  try {
+    // 获取当前工作区路径
+    const currentWorkspacePath = vscode.workspace.workspaceFolders
+      ? vscode.workspace.workspaceFolders[0].uri.fsPath
+      : null;
 
-  // 获取当前工作区文件夹
-  const workspaceFolders = vscode.workspace.workspaceFolders;
-  if (!workspaceFolders || workspaceFolders.length === 0) {
-    return serverConfig.smbMapping.remotePath; // 如果没有工作区，则默认为配置的远程路径
-  }
+    if (!currentWorkspacePath) {
+      return null;
+    }
 
-  // 获取当前工作区路径
-  const currentWorkspacePath = workspaceFolders[0].uri.fsPath;
+    // 首先尝试使用新的 smbMappingList
+    if (serverConfig.smbMappingList && serverConfig.smbMappingList.length > 0) {
+      for (const mapping of serverConfig.smbMappingList) {
+        if (!mapping || !mapping.localPath || !mapping.remotePath) {
+          continue;
+        }
 
-  // 标准化路径以确保一致的格式
-  let normalizedLocalPath = serverConfig.smbMapping.localPath.replace(/\\/g, '/');
-  let normalizedWorkspacePath = currentWorkspacePath.replace(/\\/g, '/');
-  const normalizedRemotePath = serverConfig.smbMapping.remotePath.replace(/\/+$/, '');
+        // 标准化路径
+        let normalizedWorkspacePath = currentWorkspacePath.replace(/\\/g, '/');
+        let normalizedLocalPath = mapping.localPath.replace(/\\/g, '/');
+        let normalizedRemotePath = mapping.remotePath.replace(/\\/g, '/');
 
-  // 处理 Windows 驱动器盘符（例如 C:）
-  // 移除驱动器盘符部分进行比较
-  if (/^[a-zA-Z]:/.test(normalizedLocalPath)) {
-    const localDrive = normalizedLocalPath.substring(0, 2).toUpperCase();
-    const workspaceDrive = normalizedWorkspacePath.substring(0, 2).toUpperCase();
+        // 处理 Windows 驱动器盘符
+        const workspaceDrive = /^[a-zA-Z]:/.test(normalizedWorkspacePath)
+          ? normalizedWorkspacePath.substring(0, 2).toUpperCase()
+          : '';
 
-    // 确保工作区和本地路径在同一个驱动器上
-    if (localDrive === workspaceDrive) {
-      // 移除驱动器盘符以便正确比较路径
-      normalizedLocalPath = normalizedLocalPath.substring(2);
-      normalizedWorkspacePath = normalizedWorkspacePath.substring(2);
-    } else {
-      // 如果不在同一个驱动器上，则无法映射
-      logger.warn('工作区路径 ' + currentWorkspacePath + ' 与配置的 SMB 路径 ' + serverConfig.smbMapping.localPath + ' 不在同一个驱动器上');
+        if (workspaceDrive) {
+          normalizedWorkspacePath = normalizedWorkspacePath.substring(2);
+        }
+
+        // 确保路径以斜杠开头
+        if (!normalizedWorkspacePath.startsWith('/')) {
+          normalizedWorkspacePath = '/' + normalizedWorkspacePath;
+        }
+
+        if (!normalizedLocalPath.startsWith('/')) {
+          normalizedLocalPath = '/' + normalizedLocalPath;
+        }
+
+        if (!normalizedRemotePath.startsWith('/')) {
+          normalizedRemotePath = '/' + normalizedRemotePath;
+        }
+
+        // 处理 Windows 驱动器盘符
+        const localDrive = /^[a-zA-Z]:/.test(normalizedLocalPath)
+          ? normalizedLocalPath.substring(0, 2).toUpperCase()
+          : '';
+
+        // 确保工作区和本地路径在同一个驱动器上（如果有驱动器）
+        if (workspaceDrive && localDrive && workspaceDrive !== localDrive) {
+          continue;
+        }
+
+        if (localDrive) {
+          normalizedLocalPath = normalizedLocalPath.substring(2);
+        }
+
+        // 检查当前工作区是否在本地 SMB 路径内
+        if (normalizedWorkspacePath.startsWith(normalizedLocalPath)) {
+          // 计算相对于本地 SMB 根目录的相对路径
+          let relativePath = normalizedWorkspacePath.substring(normalizedLocalPath.length);
+
+          // 确保相对路径以斜杠开头
+          if (!relativePath.startsWith('/')) {
+            relativePath = '/' + relativePath;
+          }
+
+          // 与远程路径连接，确保正确的路径分隔符
+          return normalizedRemotePath + relativePath;
+        } else {
+          // 尝试直接替换路径前缀
+          const pathParts = normalizedWorkspacePath.split('/').filter(Boolean);
+          const localPathParts = normalizedLocalPath.split('/').filter(Boolean);
+
+          // 查找公共路径部分
+          let commonIndex = 0;
+          while (commonIndex < localPathParts.length &&
+            commonIndex < pathParts.length &&
+            localPathParts[commonIndex] === pathParts[commonIndex]) {
+            commonIndex++;
+          }
+
+          if (commonIndex > 0) {
+            // 构建相对路径
+            const relativePathParts = pathParts.slice(commonIndex);
+            const relativePath = '/' + relativePathParts.join('/');
+            return normalizedRemotePath + relativePath;
+          }
+        }
+      }
+    }
+
+    // 如果新的映射列表没有匹配，回退到原有的 smbMapping 逻辑
+    if (serverConfig.smbMapping && serverConfig.smbMapping.localPath && serverConfig.smbMapping.remotePath) {
+      // 标准化路径
+      let normalizedWorkspacePath = currentWorkspacePath.replace(/\\/g, '/');
+      let normalizedLocalPath = serverConfig.smbMapping.localPath.replace(/\\/g, '/');
+      let normalizedRemotePath = serverConfig.smbMapping.remotePath.replace(/\\/g, '/');
+
+      // 处理 Windows 驱动器盘符
+      const workspaceDrive = /^[a-zA-Z]:/.test(normalizedWorkspacePath)
+        ? normalizedWorkspacePath.substring(0, 2).toUpperCase()
+        : '';
+
+      if (workspaceDrive) {
+        normalizedWorkspacePath = normalizedWorkspacePath.substring(2);
+      }
+
+      // 确保路径以斜杠开头
+      if (!normalizedWorkspacePath.startsWith('/')) {
+        normalizedWorkspacePath = '/' + normalizedWorkspacePath;
+      }
+
+      if (!normalizedLocalPath.startsWith('/')) {
+        normalizedLocalPath = '/' + normalizedLocalPath;
+      }
+
+      if (!normalizedRemotePath.startsWith('/')) {
+        normalizedRemotePath = '/' + normalizedRemotePath;
+      }
+
+      // 处理 Windows 驱动器盘符
+      const localDrive = /^[a-zA-Z]:/.test(normalizedLocalPath)
+        ? normalizedLocalPath.substring(0, 2).toUpperCase()
+        : '';
+
+      // 确保工作区和本地路径在同一个驱动器上（如果有驱动器）
+      if (workspaceDrive && localDrive && workspaceDrive !== localDrive) {
+        return serverConfig.smbMapping.remotePath;
+      }
+
+      if (localDrive) {
+        normalizedLocalPath = normalizedLocalPath.substring(2);
+      }
+
+      // 检查当前工作区是否在本地 SMB 路径内
+      if (normalizedWorkspacePath.startsWith(normalizedLocalPath)) {
+        // 计算相对于本地 SMB 根目录的相对路径
+        let relativePath = normalizedWorkspacePath.substring(normalizedLocalPath.length);
+
+        // 确保相对路径以斜杠开头
+        if (!relativePath.startsWith('/')) {
+          relativePath = '/' + relativePath;
+        }
+
+        // 与远程路径连接，确保正确的路径分隔符
+        return normalizedRemotePath + relativePath;
+      } else {
+        // 尝试直接替换路径前缀
+        const pathParts = normalizedWorkspacePath.split('/').filter(Boolean);
+        const localPathParts = normalizedLocalPath.split('/').filter(Boolean);
+
+        // 查找公共路径部分
+        let commonIndex = 0;
+        while (commonIndex < localPathParts.length &&
+          commonIndex < pathParts.length &&
+          localPathParts[commonIndex] === pathParts[commonIndex]) {
+          commonIndex++;
+        }
+
+        if (commonIndex > 0) {
+          // 构建相对路径
+          const relativePathParts = pathParts.slice(commonIndex);
+          const relativePath = '/' + relativePathParts.join('/');
+          return normalizedRemotePath + relativePath;
+        }
+      }
+
+      // 如果不在 SMB 路径中，则返回默认远程路径
+      logger.warn('无法映射工作区路径 ' + currentWorkspacePath + ' 到远程路径');
       return serverConfig.smbMapping.remotePath;
     }
+
+    // 如果没有配置路径映射，但有配置路径，则使用配置的路径
+    if (serverConfig.path) {
+      return serverConfig.path;
+    }
+
+    // 如果没有任何路径配置，返回 null
+    return null;
+  } catch (error) {
+    logger.error(`获取远程路径时出错: ${error.message}`);
+    return null;
   }
-
-  // 移除末尾的斜杠
-  normalizedLocalPath = normalizedLocalPath.replace(/\/+$/, '');
-
-  // 检查当前工作区是否在本地 SMB 路径内
-  if (normalizedWorkspacePath.startsWith(normalizedLocalPath)) {
-    // 计算相对于本地 SMB 根目录的相对路径
-    let relativePath = normalizedWorkspacePath.substring(normalizedLocalPath.length);
-
-    // 确保相对路径以斜杠开头
-    if (!relativePath.startsWith('/')) {
-      relativePath = '/' + relativePath;
-    }
-
-    // 与远程路径连接，确保正确的路径分隔符
-    return normalizedRemotePath + relativePath;
-  } else {
-    // 尝试直接替换路径前缀
-    // 例如：如果 localPath 是 C:/ProgramFiles 而工作区是 C:/ProgramFiles/github/c_converter
-    // 则应该映射到 /home/root/github/c_converter
-    const pathParts = normalizedWorkspacePath.split('/').filter(Boolean);
-    const localPathParts = normalizedLocalPath.split('/').filter(Boolean);
-
-    // 查找公共路径部分
-    let commonIndex = 0;
-    while (commonIndex < localPathParts.length &&
-      commonIndex < pathParts.length &&
-      localPathParts[commonIndex] === pathParts[commonIndex]) {
-      commonIndex++;
-    }
-
-    if (commonIndex > 0) {
-      // 构建相对路径
-      const relativePathParts = pathParts.slice(commonIndex);
-      const relativePath = '/' + relativePathParts.join('/');
-      return normalizedRemotePath + relativePath;
-    }
-  }
-
-  // 如果不在 SMB 路径中，则返回默认远程路径
-  logger.warn('无法映射工作区路径 ' + currentWorkspacePath + ' 到远程路径');
-  return serverConfig.smbMapping.remotePath;
 }
 
 /**
@@ -2074,20 +2195,37 @@ function getRemotePathFromSmbMapping(serverConfig) {
  * @returns {string|null} - 转换后的本地路径，如果无法转换则返回 null
  */
 function convertRemotePathToLocal(remotePath, server) {
-  if (!server || !server.configuration || !server.configuration.smbMapping) {
+  if (!server || !server.configuration) {
     return null;
   }
 
-  const { remotePath: remoteBase, localPath: localBase } = server.configuration.smbMapping;
+  // 首先检查 pathMappings 配置
+  if (server.configuration.pathMappings && server.configuration.pathMappings.length > 0) {
+    // 查找匹配的路径映射
+    for (const mapping of server.configuration.pathMappings) {
+      if (!mapping.remotePath || !mapping.localPath) continue;
 
-  if (!remoteBase || !localBase) {
-    return null;
+      // 检查远程路径是否以远程基础路径开头
+      if (remotePath.startsWith(mapping.remotePath)) {
+        // 替换远程基础路径为本地基础路径
+        return remotePath.replace(mapping.remotePath, mapping.localPath);
+      }
+    }
   }
 
-  // 检查远程路径是否以远程基础路径开头
-  if (remotePath.startsWith(remoteBase)) {
-    // 替换远程基础路径为本地基础路径
-    return remotePath.replace(remoteBase, localBase);
+  // 向后兼容：如果没有找到匹配的 pathMappings，尝试使用旧的 smbMapping
+  if (server.configuration.smbMapping) {
+    const { remotePath: remoteBase, localPath: localBase } = server.configuration.smbMapping;
+
+    if (!remoteBase || !localBase) {
+      return null;
+    }
+
+    // 检查远程路径是否以远程基础路径开头
+    if (remotePath.startsWith(remoteBase)) {
+      // 替换远程基础路径为本地基础路径
+      return remotePath.replace(remoteBase, localBase);
+    }
   }
 
   return null;
@@ -2369,7 +2507,8 @@ function findPotentialPaths(text, prefix = null) {
 
       // 添加到结果（避免重复）
       const isDuplicate = results.some(r => r.path === path);
-      if (!isDuplicate) {
+      const isUrl = /^https?:\/\/|^ftp:\/\/|^ftps:\/\/|^file:\/\//.test(path);
+      if (!isDuplicate && !isUrl) {
         results.push({
           path: path,
           startIndex: startIndex,
@@ -2439,7 +2578,8 @@ function findPotentialPaths(text, prefix = null) {
 
           // 添加到结果（避免重复）
           const isDuplicate = results.some(r => r.path === path);
-          if (!isDuplicate) {
+          const isUrl = /^https?:\/\/|^ftp:\/\/|^ftps:\/\/|^file:\/\//.test(path);
+          if (!isDuplicate && !isUrl) {
             results.push({
               path: path,
               startIndex: startIndex,

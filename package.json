@@ -207,19 +207,57 @@
                     },
                     "description": "连接后自动执行的命令"
                   },
+                  "pathMappings": {
+                    "type": "array",
+                    "default": [],
+                    "description": "路径映射配置列表",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "localPath": {
+                          "type": "string",
+                          "description": "本地路径"
+                        },
+                        "remotePath": {
+                          "type": "string",
+                          "description": "远程路径"
+                        }
+                      },
+                      "description": "路径映射配置"
+                    }
+                  },
                   "smbMapping": {
                     "type": "object",
                     "properties": {
                       "localPath": {
                         "type": "string",
-                        "description": "本地路径"
+                        "description": "本地路径 (已弃用，请使用 pathMappings)"
                       },
                       "remotePath": {
                         "type": "string",
-                        "description": "远程路径"
+                        "description": "远程路径 (已弃用，请使用 pathMappings)"
                       }
                     },
-                    "description": "SMB路径映射配置"
+                    "description": "SMB路径映射配置 (已弃用，请使用 pathMappings)"
+                  },
+                  "smbMappingList": {
+                    "type": "array",
+                    "default": [],
+                    "description": "SMB路径映射配置列表",
+                    "items": {
+                      "type": "object",
+                      "required": ["localPath", "remotePath"],
+                      "properties": {
+                        "localPath": {
+                          "type": "string",
+                          "description": "本地路径"
+                        },
+                        "remotePath": {
+                          "type": "string",
+                          "description": "远程路径"
+                        }
+                      }
+                    }
                   },
                   "customCommands": {
                     "type": "array",
