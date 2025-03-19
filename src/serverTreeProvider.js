@@ -311,9 +311,8 @@ class ServerTreeProvider {
       items.push(customCommandsGroup);
     }
 
-    // 添加 SMB 映射组 - 同时支持新旧配置
-    if ((server.configuration.smbMapping && (server.configuration.smbMapping.localPath || server.configuration.smbMapping.remotePath)) ||
-      (server.configuration.smbMappingList && server.configuration.smbMappingList.length > 0)) {
+    // 添加 SMB 映射组 - 只检查 smbMappingList
+    if (server.configuration.smbMappingList && server.configuration.smbMappingList.length > 0) {
       const smbGroup = this.createGroupItem('SMB 映射', 'smb-group', 'folder-opened', server);
       items.push(smbGroup);
     }
@@ -422,7 +421,7 @@ class ServerTreeProvider {
     const server = element.server;
     const items = [];
 
-    // 处理新的 smbMappingList 配置
+    // 只处理 smbMappingList 配置
     if (server.configuration.smbMappingList && server.configuration.smbMappingList.length > 0) {
       server.configuration.smbMappingList.forEach((mapping, index) => {
         if (mapping.localPath || mapping.remotePath) {
@@ -446,28 +445,6 @@ class ServerTreeProvider {
           }
         }
       });
-    }
-
-    // 处理旧的 smbMapping 配置
-    if (server.configuration.smbMapping) {
-      const smbMapping = server.configuration.smbMapping;
-
-      // 只有在有效的映射配置存在时才显示
-      if (smbMapping.localPath || smbMapping.remotePath) {
-        if (smbMapping.localPath) {
-          const localPathItem = new vscode.TreeItem(`本地路径: ${smbMapping.localPath}`, vscode.TreeItemCollapsibleState.None);
-          localPathItem.iconPath = new vscode.ThemeIcon('folder-opened');
-          localPathItem.contextValue = 'smb-local-path';
-          items.push(localPathItem);
-        }
-
-        if (smbMapping.remotePath) {
-          const remotePathItem = new vscode.TreeItem(`远程路径: ${smbMapping.remotePath}`, vscode.TreeItemCollapsibleState.None);
-          remotePathItem.iconPath = new vscode.ThemeIcon('remote');
-          remotePathItem.contextValue = 'smb-remote-path';
-          items.push(remotePathItem);
-        }
-      }
     }
 
     // 如果没有任何有效的映射配置，显示提示信息

@@ -12,17 +12,27 @@ var format = function (element) {
     privateKey: element.privateKey, // 用于授权（可以为undefined）
     agent: element.agent, // 用于授权（可以为undefined）
     customCommands: element.customCommands, // 用于指定会话开始时执行的命令
-    smbMappingList: element.smbMappingList || [], // 新的SMB映射列表配置
-    // 兼容旧版配置，如果存在旧的配置则转换为新格式
-    smbMapping: element.smbMapping // 保留旧配置以供兼容
+    smbMappingList: [] // 初始化为空数组
   };
 
-  // 如果存在旧的 smbMapping 配置但没有新的 smbMappingList，则转换为新格式
-  if (element.smbMapping && (!element.smbMappingList || element.smbMappingList.length === 0)) {
-    config.smbMappingList = [{
+  // 合并 smbMapping 到 smbMappingList
+  if (element.smbMapping && (element.smbMapping.localPath || element.smbMapping.remotePath)) {
+    config.smbMappingList.push({
       localPath: element.smbMapping.localPath,
       remotePath: element.smbMapping.remotePath
-    }];
+    });
+  }
+
+  // 添加新的 smbMappingList
+  if (element.smbMappingList && Array.isArray(element.smbMappingList)) {
+    element.smbMappingList.forEach(mapping => {
+      if (mapping && (mapping.localPath || mapping.remotePath)) {
+        config.smbMappingList.push({
+          localPath: mapping.localPath,
+          remotePath: mapping.remotePath
+        });
+      }
+    });
   }
 
   return config;
