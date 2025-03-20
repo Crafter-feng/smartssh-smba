@@ -9,8 +9,9 @@ const path = require('path');
 const { Client } = require('ssh2');
 const terminalManager = require('./terminal-manager');
 const pathConverter = require('./path-converter');
-const { logger } = require('../../adapters/logger');
+const { logger } = require('../utils/logger');
 const commandExistsSync = require('command-exists').sync;
+const configLoader = require('../../adapters/config-loader');
 
 /**
  * 建立SSH连接
@@ -343,7 +344,7 @@ function checkSSHExecutable() {
  * @returns {Array} - 服务器列表
  */
 function getServerList() {
-  return pathConverter.getServerList();
+  return configLoader.getServerList();
 }
 
 /**

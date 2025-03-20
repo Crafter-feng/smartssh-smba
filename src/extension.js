@@ -3,12 +3,12 @@
 /* eslint-disable @stylistic/comma-dangle */
 
 const vscode = require('vscode');
-const { logger } = require('../adapters/logger');
+const { logger } = require('./utils/logger');
 const commands = require('./commands');
 const statusBar = require('./ui/status-bar');
 const { ServerTreeProvider } = require('./ui/tree-view/server-provider');
 const { CommandTreeProvider } = require('./ui/tree-view/command-provider');
-const configLoader = require('../adapters/config-loader');
+const configLoader = require('./adapters/config-loader');
 
 /**
  * 扩展激活入口点
@@ -44,14 +44,43 @@ function activate(context) {
     // 注册命令
     commands.registerAll(context);
     
-    // 设置配置监视器
-    setupConfigWatchers(context);
+    // 监听配置变更
+    context.subscriptions.push(
+      vscode.workspace.onDidChangeConfiguration(event => {
+        if (event.affectsConfiguration('smartssh-smba')) {
+          // 刷新配置缓存
+          configLoader.refreshCache();
+          
+          // 刷新树视图
+          serverTreeProvider.refresh();
+          commandTreeProvider.refresh();
+          
+          logger.info('配置已更新，刷新视图');
+        }
+      })
+    );
     
     // 注册文件路径点击处理
-    registerFilePathClickHandler(context);
+    context.subscriptions.push(
+      vscode.commands.registerCommand('smartssh-smba.handlePathClick', (path) => {
+        if (path) {
+          try {
+            // 打开文件
+            const uri = vscode.Uri.file(path);
+            vscode.workspace.openTextDocument(uri).then(doc => {
+              vscode.window.showTextDocument(doc);
+            });
+          } catch (error) {
+            logger.error(`打开文件 ${path} 时出错:`, error);
+            vscode.window.showErrorMessage(`无法打开文件 ${path}: ${error.message}`);
+          }
+        }
+      })
+    );
     
-    // 加载服务器列表
-    loadServerList();
+    // 加载初始服务器列表
+    serverTreeProvider.refresh();
+    commandTreeProvider.refresh();
     
     logger.info('扩展已成功激活');
     
@@ -72,20 +101,6 @@ function activate(context) {
  */
 function deactivate() {
   logger.info('扩展已停用');
-}
-
-// 这些函数将在后续重构中移动到各自的模块
-// 暂时保留为占位符，直到完全重构
-function setupConfigWatchers(context) {
-  // TODO: 移到适当的模块
-}
-
-function registerFilePathClickHandler(context) {
-  // TODO: 移到适当的模块
-}
-
-function loadServerList() {
-  // TODO: 移到适当的模块
 }
 
 module.exports = {
