@@ -111,7 +111,21 @@ function loadConfig() {
     // 合并配置
     const integratedConfig = {
       showHostsInPickLists: workspaceConfig.showHostsInPickLists || globalConfig.showHostsInPickLists || false,
-      serverList: [...(globalConfig.serverList || []), ...(workspaceConfig.serverList || [])],
+      serverList: [...(globalConfig.serverList || []), ...(workspaceConfig.serverList || [])].map(server => {
+        // Convert smbMapping to smbMappingList if necessary
+        if (server.smbMapping && (server.smbMapping.localPath || server.smbMapping.remotePath)) {
+          server.smbMappingList = server.smbMappingList || [];
+          const mappingKey = `${server.smbMapping.localPath || ''}:${server.smbMapping.remotePath || ''}`;
+          if (!server.smbMappingList.some(mapping => `${mapping.localPath || ''}:${mapping.remotePath || ''}` === mappingKey)) {
+            server.smbMappingList.push({
+              localPath: server.smbMapping.localPath,
+              remotePath: server.smbMapping.remotePath
+            });
+          }
+          delete server.smbMapping; // Remove old smbMapping
+        }
+        return server;
+      }),
       // 确保全局命令不包含工作区标识
       customCommands: (globalConfig.customCommands || []).map(cmd => ({
         ...cmd,
@@ -260,16 +274,6 @@ async function updateWorkspaceCommands(commands) {
     logger.error(' 更新工作区命令时出错:', error);
     throw error;
   }
-}
-
-/**
- * 设置监视回调
- * @param {Function} callback - 回调函数
- * @deprecated 使用 vscode.workspace.onDidChangeConfiguration 代替
- */
-function setWatcherCallback(callback) {
-  logger.info(' 配置监视回调已弃用，请使用 vscode.workspace.onDidChangeConfiguration');
-  // 不执行任何操作
 }
 
 module.exports = {

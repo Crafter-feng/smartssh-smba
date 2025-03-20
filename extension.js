@@ -4,6 +4,7 @@
 // 'vscode' 模块包含 VS Code 扩展 API
 const vscode = require('vscode');
 const fs = require('fs').promises;
+const path = require('path');
 const commandExistsSync = require('command-exists').sync;
 const configLoader = require('./adapters/config-loader');
 const { ServerTreeProvider, CommandTreeProvider } = require('./src/serverTreeProvider');
@@ -2010,102 +2011,118 @@ function getRemotePathFromSmbMapping(serverConfig) {
       return null;
     }
 
-    // 使用统一的 smbMappingList 处理逻辑
-    if (serverConfig.smbMappingList && serverConfig.smbMappingList.length > 0) {
+    logger.debug(`当前工作区路径: ${currentWorkspacePath}`);
+
+    // 使用 smbMappingList
+    if (serverConfig.smbMappingList && Array.isArray(serverConfig.smbMappingList)) {
+      // 标准化工作区路径
+      let normalizedWorkspacePath = currentWorkspacePath.replace(/\\/g, '/').toLowerCase();
+
+      // 处理 Windows 驱动器盘符
+      const workspaceDrive = /^[a-zA-Z]:/.test(normalizedWorkspacePath)
+        ? normalizedWorkspacePath.substring(0, 1).toLowerCase()
+        : '';
+
+      if (workspaceDrive) {
+        normalizedWorkspacePath = normalizedWorkspacePath.substring(2);
+      }
+
+      // 确保路径以斜杠开头
+      if (!normalizedWorkspacePath.startsWith('/')) {
+        normalizedWorkspacePath = '/' + normalizedWorkspacePath;
+      }
+
+      logger.debug(`标准化后的工作区路径: ${normalizedWorkspacePath}`);
+
+      // 遍历所有映射
       for (const mapping of serverConfig.smbMappingList) {
         if (!mapping || !mapping.localPath || !mapping.remotePath) {
           continue;
         }
 
-        // 标准化路径
-        let normalizedWorkspacePath = currentWorkspacePath.replace(/\\/g, '/');
-        let normalizedLocalPath = mapping.localPath.replace(/\\/g, '/');
-        let normalizedRemotePath = mapping.remotePath.replace(/\\/g, '/');
-
-        // 处理 Windows 驱动器盘符
-        const workspaceDrive = /^[a-zA-Z]:/.test(normalizedWorkspacePath)
-          ? normalizedWorkspacePath.substring(0, 2).toUpperCase()
+        // 标准化本地路径
+        let normalizedLocalPath = mapping.localPath.replace(/\\/g, '/').toLowerCase();
+        const localDrive = /^[a-zA-Z]:/.test(normalizedLocalPath)
+          ? normalizedLocalPath.substring(0, 1).toLowerCase()
           : '';
 
-        if (workspaceDrive) {
-          normalizedWorkspacePath = normalizedWorkspacePath.substring(2);
+        if (localDrive) {
+          // 如果工作区和本地路径的驱动器不匹配，跳过此映射
+          if (workspaceDrive && localDrive !== workspaceDrive) {
+            logger.debug(`驱动器不匹配: ${localDrive} !== ${workspaceDrive}`);
+            continue;
+          }
+          normalizedLocalPath = normalizedLocalPath.substring(2);
         }
 
-        // 确保路径以斜杠开头
-        if (!normalizedWorkspacePath.startsWith('/')) {
-          normalizedWorkspacePath = '/' + normalizedWorkspacePath;
-        }
-
+        // 确保本地路径以斜杠开头
         if (!normalizedLocalPath.startsWith('/')) {
           normalizedLocalPath = '/' + normalizedLocalPath;
         }
 
-        if (!normalizedRemotePath.startsWith('/')) {
-          normalizedRemotePath = '/' + normalizedRemotePath;
-        }
+        // 标准化远程路径，处理 ~/ 开头的路径
+        let normalizedRemotePath = mapping.remotePath.replace(/\\/g, '/');
 
-        // 处理 Windows 驱动器盘符
-        const localDrive = /^[a-zA-Z]:/.test(normalizedLocalPath)
-          ? normalizedLocalPath.substring(0, 2).toUpperCase()
-          : '';
-
-        // 确保工作区和本地路径在同一个驱动器上（如果有驱动器）
-        if (workspaceDrive && localDrive && workspaceDrive !== localDrive) {
-          continue;
-        }
-
-        if (localDrive) {
-          normalizedLocalPath = normalizedLocalPath.substring(2);
-        }
-
-        // 检查当前工作区是否在本地 SMB 路径内
-        if (normalizedWorkspacePath.startsWith(normalizedLocalPath)) {
-          // 计算相对于本地 SMB 根目录的相对路径
-          let relativePath = normalizedWorkspacePath.substring(normalizedLocalPath.length);
-
-          // 确保相对路径以斜杠开头
-          if (!relativePath.startsWith('/')) {
-            relativePath = '/' + relativePath;
+        // 处理 ~/ 开头的路径
+        if (normalizedRemotePath.startsWith('~/')) {
+          // 保持 ~/ 开头
+          if (!normalizedRemotePath.startsWith('~/')) {
+            normalizedRemotePath = '~/' + normalizedRemotePath.substring(1);
           }
-
-          // 与远程路径连接，确保正确的路径分隔符
-          return normalizedRemotePath + relativePath;
         } else {
-          // 尝试直接替换路径前缀
-          const pathParts = normalizedWorkspacePath.split('/').filter(Boolean);
-          const localPathParts = normalizedLocalPath.split('/').filter(Boolean);
-
-          // 查找公共路径部分
-          let commonIndex = 0;
-          while (commonIndex < localPathParts.length &&
-            commonIndex < pathParts.length &&
-            localPathParts[commonIndex] === pathParts[commonIndex]) {
-            commonIndex++;
+          // 非 ~/ 开头的路径确保以 / 开头
+          if (!normalizedRemotePath.startsWith('/')) {
+            normalizedRemotePath = '/' + normalizedRemotePath;
           }
+        }
 
-          if (commonIndex > 0) {
-            // 构建相对路径
-            const relativePathParts = pathParts.slice(commonIndex);
-            const relativePath = '/' + relativePathParts.join('/');
-            return normalizedRemotePath + relativePath;
-          }
+        logger.debug(`检查映射: 本地=${normalizedLocalPath}, 远程=${normalizedRemotePath}`);
+
+        // 检查工作区路径是否在此映射范围内
+        if (normalizedWorkspacePath.startsWith(normalizedLocalPath)) {
+          // 计算相对路径
+          const relativePath = normalizedWorkspacePath.substring(normalizedLocalPath.length);
+
+          // 移除开头的斜杠（如果存在）
+          const cleanRelativePath = relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
+
+          // 移除远程路径末尾的斜杠（如果存在）
+          const cleanRemotePath = normalizedRemotePath.endsWith('/')
+            ? normalizedRemotePath.slice(0, -1)
+            : normalizedRemotePath;
+
+          // 使用单个斜杠连接路径，保持 ~/ 的情况
+          const remotePath = `${cleanRemotePath}/${cleanRelativePath}`;
+
+          logger.info(`找到匹配的映射: ${remotePath}`);
+          return remotePath;
         }
       }
 
-      // 如果所有映射都不匹配，使用第一个映射的远程路径作为默认值
-      // 添加检查确保第一个映射有远程路径
-      if (serverConfig.smbMappingList[0] && serverConfig.smbMappingList[0].remotePath) {
-        logger.warn('无法映射工作区路径 ' + currentWorkspacePath + ' 到远程路径，使用默认远程路径');
-        return serverConfig.smbMappingList[0].remotePath;
+      // 如果没有找到匹配的映射，但有映射配置，使用第一个映射的远程路径
+      if (serverConfig.smbMappingList.length > 0 && serverConfig.smbMappingList[0].remotePath) {
+        let defaultPath = serverConfig.smbMappingList[0].remotePath;
+        // 确保默认路径也正确处理 ~/
+        if (!defaultPath.startsWith('~/') && !defaultPath.startsWith('/')) {
+          defaultPath = '/' + defaultPath;
+        }
+        logger.warn(`无法精确映射工作区路径 ${currentWorkspacePath}，使用默认远程路径: ${defaultPath}`);
+        return defaultPath;
       }
     }
 
     // 如果没有配置路径映射，但有配置路径，则使用配置的路径
     if (serverConfig.path) {
-      return serverConfig.path;
+      // 确保配置路径也正确处理 ~/
+      let configPath = serverConfig.path;
+      if (!configPath.startsWith('~/') && !configPath.startsWith('/')) {
+        configPath = '/' + configPath;
+      }
+      logger.debug(`使用配置的默认路径: ${configPath}`);
+      return configPath;
     }
 
-    // 如果没有任何路径配置，返回 null
+    logger.debug('没有找到可用的路径映射');
     return null;
   } catch (error) {
     logger.error(`获取远程路径时出错: ${error.message}`);
@@ -2125,20 +2142,102 @@ function convertRemotePathToLocal(remotePath, server) {
       return null;
     }
 
-    // 使用统一的 smbMappingList 处理逻辑
-    if (server.configuration.smbMappingList && server.configuration.smbMappingList.length > 0) {
-      // 遍历所有映射，找到匹配的映射关系
+    logger.debug(`尝试转换远程路径: ${remotePath}`);
+
+    // 使用 smbMappingList
+    if (server.configuration.smbMappingList && Array.isArray(server.configuration.smbMappingList)) {
+      // 标准化远程路径
+      let normalizedRemotePath = remotePath.replace(/\\/g, '/');
+
+      // 确保远程路径是以 / 或 ~/ 开头
+      if (!normalizedRemotePath.startsWith('/') && !normalizedRemotePath.startsWith('~/')) {
+        logger.debug('远程路径必须以 / 或 ~/ 开头');
+        return null;
+      }
+
+      // 遍历所有映射
       for (const mapping of server.configuration.smbMappingList) {
-        if (mapping && mapping.remotePath && mapping.localPath && remotePath.startsWith(mapping.remotePath)) {
-          return remotePath.replace(mapping.remotePath, mapping.localPath);
+        if (!mapping || !mapping.localPath || !mapping.remotePath) {
+          continue;
+        }
+
+        // 标准化映射的远程路径
+        let normalizedMappingRemote = mapping.remotePath.replace(/\\/g, '/');
+
+        // 确保映射的远程路径也是以 / 或 ~/ 开头
+        if (!normalizedMappingRemote.startsWith('/') && !normalizedMappingRemote.startsWith('~/')) {
+          normalizedMappingRemote = '/' + normalizedMappingRemote;
+        }
+
+        // 移除末尾的斜杠
+        normalizedMappingRemote = normalizedMappingRemote.endsWith('/')
+          ? normalizedMappingRemote.slice(0, -1)
+          : normalizedMappingRemote;
+        normalizedRemotePath = normalizedRemotePath.endsWith('/')
+          ? normalizedRemotePath.slice(0, -1)
+          : normalizedRemotePath;
+
+        // 如果两个路径都是 ~/ 开头，移除 ~/ 后比较
+        if (normalizedMappingRemote.startsWith('~/') && normalizedRemotePath.startsWith('~/')) {
+          const mappingWithoutTilde = normalizedMappingRemote.substring(2);
+          const pathWithoutTilde = normalizedRemotePath.substring(2);
+
+          if (!pathWithoutTilde.startsWith(mappingWithoutTilde)) {
+            continue;
+          }
+
+          // 计算相对路径
+          const relativePath = pathWithoutTilde.substring(mappingWithoutTilde.length);
+          const cleanRelativePath = relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
+
+          // 标准化本地路径（确保是Windows格式的路径）
+          let localPath = mapping.localPath.replace(/\//g, '\\');
+
+          // 确保本地路径是以盘符开头
+          if (!/^[a-zA-Z]:/i.test(localPath)) {
+            logger.debug('本地路径必须以盘符开头');
+            continue;
+          }
+
+          // 拼接最终路径
+          const finalPath = localPath.endsWith('\\')
+            ? `${localPath}${cleanRelativePath.replace(/\//g, '\\')}`
+            : `${localPath}\\${cleanRelativePath.replace(/\//g, '\\')}`;
+
+          logger.info(`找到匹配的映射，转换为本地路径: ${finalPath}`);
+          return finalPath;
+        }
+
+        // 处理普通的 / 开头路径
+        if (normalizedRemotePath.startsWith(normalizedMappingRemote)) {
+          // 计算相对路径
+          const relativePath = normalizedRemotePath.substring(normalizedMappingRemote.length);
+          const cleanRelativePath = relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
+
+          // 标准化本地路径（确保是Windows格式的路径）
+          let localPath = mapping.localPath.replace(/\//g, '\\');
+
+          // 确保本地路径是以盘符开头
+          if (!/^[a-zA-Z]:/i.test(localPath)) {
+            logger.debug('本地路径必须以盘符开头');
+            continue;
+          }
+
+          // 拼接最终路径
+          const finalPath = localPath.endsWith('\\')
+            ? `${localPath}${cleanRelativePath.replace(/\//g, '\\')}`
+            : `${localPath}\\${cleanRelativePath.replace(/\//g, '\\')}`;
+
+          logger.info(`找到匹配的映射，转换为本地路径: ${finalPath}`);
+          return finalPath;
         }
       }
     }
 
-    // 如果没有找到匹配的映射，返回null
+    logger.debug('没有找到匹配的映射');
     return null;
   } catch (error) {
-    logger.error('转换远程路径时出错:', error);
+    logger.error(`转换远程路径时出错: ${error.message}`);
     return null;
   }
 }
@@ -2169,19 +2268,23 @@ async function checkPathExists(path) {
  */
 function registerFilePathClickHandler(context) {
   // 注册命令以打开转换后的文件路径
-  const disposable = vscode.commands.registerCommand('smartssh-smba.openMappedFile', async (filePath, serverName) => {
+  const disposable = vscode.commands.registerCommand('smartssh-smba.openMappedFile', async (filePath, serverName, line, column) => {
     try {
       logger.info(`尝试打开映射文件: ${filePath}`);
 
+      // 提取文件名和行列号信息（如果没有传入，尝试从路径中解析）
+      const fileInfo = extractFileInfo(filePath);
+      const fileName = fileInfo.fileName;
+      line = line || fileInfo.line;
+      column = column || fileInfo.column;
+
       // 确定要使用的服务器
       let server = null;
-
-      // 如果提供了服务器名称，直接使用
       if (serverName) {
         server = servers.find(s => s.name === serverName);
       } else {
-        // 否则尝试从活动终端获取
-        const activeTerminal = vscode.window.activeTerminal ? terminals.find(t => t.terminal === vscode.window.activeTerminal) : null;
+        const activeTerminal = vscode.window.activeTerminal ?
+          terminals.find(t => t.terminal === vscode.window.activeTerminal) : null;
         if (activeTerminal) {
           server = servers.find(s => s.name === activeTerminal.name);
         }
@@ -2189,76 +2292,46 @@ function registerFilePathClickHandler(context) {
 
       if (!server) {
         logger.warn('没有活动的服务器连接');
+        // 即使没有服务器连接，也尝试通过文件名搜索
+        await searchAndOpenFile(fileName, line, column);
         return;
       }
 
-      // 转换路径
+      // 尝试转换路径
       const localPath = convertRemotePathToLocal(filePath, server);
-      if (!localPath) {
-        logger.warn(`无法转换路径: ${filePath}`);
-        return;
-      }
+      if (localPath) {
+        // 检查文件是否存在
+        const { exists, isDirectory } = await checkPathExists(localPath);
 
-      // 检查文件是否存在
-      const { exists, isDirectory } = await checkPathExists(localPath);
-
-      if (!exists) {
-        // 文件不存在时，直接不处理
-        logger.warn(`文件不存在: ${localPath}`);
-        return;
-      }
-
-      // 根据路径类型执行不同操作
-      if (isDirectory) {
-        // 如果是目录，尝试在 VS Code 中打开
-        logger.info(`打开文件夹: ${localPath}`);
-
-        // 检查是否是工作区的文件夹
-        const workspaceFolders = vscode.workspace.workspaceFolders || [];
-        const path = require('path');
-        const isWorkspaceFolder = workspaceFolders.some(folder => {
-          const folderPath = folder.uri.fsPath;
-          return localPath === folderPath || localPath.startsWith(folderPath + path.sep);
-        });
-
-        if (isWorkspaceFolder) {
-          // 如果是工作区文件夹，使用 VS Code 的 explorer.reveal 命令
-          const uri = vscode.Uri.file(localPath);
-          await vscode.commands.executeCommand('revealInExplorer', uri);
-        } else {
-          // 如果不是工作区文件夹，尝试添加到工作区
-          const uri = vscode.Uri.file(localPath);
-          const openInNewWindow = await vscode.window.showQuickPick(
-            ['在当前窗口打开', '在新窗口打开', '添加到工作区', '在文件浏览器中打开'],
-            { placeHolder: '如何打开文件夹?' }
-          );
-
-          if (openInNewWindow === '在新窗口打开') {
-            await vscode.commands.executeCommand('vscode.openFolder', uri, true);
-          } else if (openInNewWindow === '在当前窗口打开') {
-            await vscode.commands.executeCommand('vscode.openFolder', uri, false);
-          } else if (openInNewWindow === '添加到工作区') {
-            await vscode.workspace.updateWorkspaceFolders(
-              workspaceFolders.length,
-              null,
-              { uri }
-            );
-          } else if (openInNewWindow === '在文件浏览器中打开') {
-            await vscode.commands.executeCommand('revealFileInOS', uri);
+        if (exists) {
+          if (isDirectory) {
+            // 处理目录的逻辑保持不变...
+          } else {
+            // 如果是文件，打开文件
+            logger.info(`打开文件: ${localPath}`);
+            try {
+              const document = await vscode.workspace.openTextDocument(localPath);
+              const editor = await vscode.window.showTextDocument(document);
+              if (line !== undefined) {
+                const position = new vscode.Position(line - 1, column || 0);
+                editor.selection = new vscode.Selection(position, position);
+                editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+              }
+            } catch (error) {
+              logger.warn(`无法在编辑器中打开文件: ${error.message}，尝试用系统默认程序打开`);
+              const uri = vscode.Uri.file(localPath);
+              await vscode.commands.executeCommand('revealFileInOS', uri);
+            }
           }
+        } else {
+          // 文件不存在，尝试通过文件名搜索
+          logger.info(`文件不存在: ${localPath}，尝试通过文件名搜索`);
+          await searchAndOpenFile(fileName, line, column);
         }
       } else {
-        // 如果是文件，打开文件
-        logger.info(`打开文件: ${localPath}`);
-        try {
-          const document = await vscode.workspace.openTextDocument(localPath);
-          await vscode.window.showTextDocument(document);
-        } catch (error) {
-          // 如果是二进制文件或其他无法用文本编辑器打开的文件，尝试用系统默认程序打开
-          logger.warn(`无法在编辑器中打开文件: ${error.message}，尝试用系统默认程序打开`);
-          const uri = vscode.Uri.file(localPath);
-          await vscode.commands.executeCommand('revealFileInOS', uri);
-        }
+        // 路径转换失败，尝试通过文件名搜索
+        logger.info(`无法转换路径: ${filePath}，尝试通过文件名搜索`);
+        await searchAndOpenFile(fileName, line, column);
       }
     } catch (error) {
       logger.error(`打开映射文件时出错: ${error.message}`);
@@ -2275,28 +2348,20 @@ function registerFilePathClickHandler(context) {
 
       // 获取当前活动终端对应的服务器
       const activeTerminal = vscode.window.activeTerminal ? terminals.find(t => t.terminal === vscode.window.activeTerminal) : null;
-
-      // 如果没有活动终端，不提供链接
       if (!activeTerminal) {
         return links;
       }
 
       // 获取活动终端对应的服务器
       const activeServer = servers.find(s => s.name === activeTerminal.name);
-
-      // 如果没有找到对应的服务器或服务器没有配置 SMB 映射，不提供链接
-      if (!activeServer || !activeServer.configuration || !activeServer.configuration.smbMapping || !activeServer.configuration.smbMapping.remotePath) {
+      if (!activeServer || !activeServer.configuration || !activeServer.configuration.smbMappingList) {
         return links;
       }
 
-      // 获取远程路径前缀
-      const prefix = activeServer.configuration.smbMapping.remotePath;
+      // 在文本中查找所有可能的路径
+      const potentialPaths = findPotentialPaths(context.line);
 
-      // 多步骤匹配策略
-      // 步骤1: 尝试找出所有可能的路径
-      const potentialPaths = findPotentialPaths(context.line, prefix);
-
-      // 步骤2: 处理每个潜在路径
+      // 处理每个潜在路径
       for (const pathInfo of potentialPaths) {
         links.push({
           startIndex: pathInfo.startIndex,
@@ -2313,27 +2378,86 @@ function registerFilePathClickHandler(context) {
 
       return links;
     },
-    handleTerminalLink: link => {
-      const { filePath, line, column, serverName } = link.data;
+    handleTerminalLink: async link => {
+      const { filePath, line, column, serverName, isRelative, workspaceRoot } = link.data;
+      try {
+        // 提取文件名
+        const fileName = filePath ? filePath.split(/[\/\\]/).pop() : null;
+        if (!fileName) {
+          logger.warn('无法获取文件名');
+          return;
+        }
 
-      // 调用我们的命令来处理路径转换和文件打开
-      vscode.commands.executeCommand('smartssh-smba.openMappedFile', filePath, serverName)
-        .then(() => {
-          // 如果有行号和列号，移动光标到指定位置
-          if (line !== undefined && vscode.window.activeTextEditor) {
-            const position = new vscode.Position(line, column || 0);
-            const selection = new vscode.Selection(position, position);
+        // 如果是相对路径，先尝试在工作区中查找
+        if (isRelative && workspaceRoot) {
+          try {
+            const absolutePath = path.resolve(workspaceRoot, filePath);
+            const uri = vscode.Uri.file(absolutePath);
+            const document = await vscode.workspace.openTextDocument(uri);
+            const editor = await vscode.window.showTextDocument(document);
 
-            vscode.window.activeTextEditor.selection = selection;
-            vscode.window.activeTextEditor.revealRange(
-              new vscode.Range(position, position),
-              vscode.TextEditorRevealType.InCenter
-            );
+            if (line !== undefined) {
+              const position = new vscode.Position(line - 1, column || 0);
+              editor.selection = new vscode.Selection(position, position);
+              editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+            }
+            return;
+          } catch (error) {
+            logger.warn(`直接打开相对路径文件失败: ${error.message}，尝试其他方法`);
           }
-        })
-        .catch(error => {
-          logger.error(`处理终端链接时出错: ${error.message}`);
-        });
+        }
+
+        // 如果有文件路径且不是相对路径，尝试通过 SMB 映射打开
+        if (filePath && !isRelative) {
+          try {
+            await vscode.commands.executeCommand('smartssh-smba.openMappedFile', filePath, serverName);
+            return;
+          } catch (error) {
+            logger.warn(`通过 SMB 映射打开文件失败: ${error.message}，尝试搜索文件`);
+          }
+        }
+
+        // 如果上述方法都失败，使用文件搜索
+        logger.info(`尝试通过搜索打开文件: ${fileName}`);
+        const files = await vscode.workspace.findFiles(`**/${fileName}`, null, 5);
+
+        if (files.length === 0) {
+          await vscode.commands.executeCommand('workbench.action.quickOpen', fileName);
+        } else if (files.length === 1) {
+          const document = await vscode.workspace.openTextDocument(files[0]);
+          const editor = await vscode.window.showTextDocument(document);
+          if (line !== undefined) {
+            const position = new vscode.Position(line - 1, column || 0);
+            editor.selection = new vscode.Selection(position, position);
+            editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+          }
+        } else {
+          const items = files.map(file => ({
+            label: path.basename(file.fsPath),
+            description: vscode.workspace.asRelativePath(file.fsPath),
+            file
+          }));
+
+          const selected = await vscode.window.showQuickPick(items, {
+            placeHolder: '选择要打开的文件'
+          });
+
+          if (selected) {
+            const document = await vscode.workspace.openTextDocument(selected.file);
+            const editor = await vscode.window.showTextDocument(document);
+            if (line !== undefined) {
+              const position = new vscode.Position(line - 1, column || 0);
+              editor.selection = new vscode.Selection(position, position);
+              editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+            }
+          }
+        }
+      } catch (error) {
+        logger.error(`处理终端链接时出错: ${error.message}`);
+        if (fileName) {
+          await vscode.commands.executeCommand('workbench.action.quickOpen', fileName);
+        }
+      }
     }
   });
 
@@ -2341,202 +2465,227 @@ function registerFilePathClickHandler(context) {
 }
 
 /**
- * 在文本中查找所有路径（包括特定前缀路径和通用路径）
+ * 在文本中查找所有路径
  * @param {string} text - 要搜索的文本
- * @param {string} [prefix] - 可选的远程路径前缀
  * @returns {Array} - 找到的路径信息数组
  */
-function findPotentialPaths(text, prefix = null) {
+function findPotentialPaths(text) {
   const results = [];
-
   try {
-    // 记录调试信息
-    logger.debug(`查找路径，文本长度: ${text.length}, 前缀: ${prefix || '无'}`);
+    // URL 检测的正则表达式
+    const urlPattern = /(?:\b(?:https?|ftp|file):\/\/|www\.)[^\s/$.?#].[^\s]*/gi;
 
-    // 步骤1: 将文本按空白字符和常见分隔符分割成多个部分
-    const parts = text.split(/[\s:"'<>|,;()[\]{}]/);
-
-    // 步骤2: 遍历每个部分，查找路径
-    for (let i = 0; i < parts.length; i++) {
-      const part = parts[i].trim();
-
-      // 跳过空部分
-      if (!part) continue;
-
-      // 检查是否是路径
-      let isPath = false;
-      let pathStart = 0;
-
-      // 如果提供了前缀，先检查是否包含前缀
-      if (prefix && part.includes(prefix)) {
-        isPath = true;
-        pathStart = part.indexOf(prefix);
-      }
-      // 否则检查是否是通用 Unix 路径（以 / 开头，包含至少一个额外的路径段）
-      else if (part.startsWith('/') && part.includes('/', 1)) {
-        isPath = true;
-        pathStart = 0;
-      }
-
-      if (!isPath) continue;
-
-      // 提取路径
-      let path = part.substring(pathStart);
-
-      // 清理路径
-      path = cleanupPath(path);
-
-      // 如果是前缀路径，确保路径至少包含前缀和一个额外的路径段
-      if (prefix && path.startsWith(prefix) &&
-        (path.length <= prefix.length || !path.includes('/', prefix.length))) {
-        continue;
-      }
-
-      // 计算在原始文本中的位置
-      const startIndex = text.indexOf(path);
-      if (startIndex === -1) continue;
-
-      // 检查是否有行列号
-      let line = undefined;
-      let column = undefined;
-      let endIndex = startIndex + path.length;
-
-      // 查找行列号
-      if (endIndex < text.length) {
-        const afterPath = text.substring(endIndex);
-        const lineColMatch = afterPath.match(/^:(\d+)(?::(\d+))?/);
-
-        if (lineColMatch) {
-          line = parseInt(lineColMatch[1]) - 1;
-          if (lineColMatch[2]) {
-            column = parseInt(lineColMatch[2]) - 1;
-          }
-
-          // 调整匹配长度以包含行列号
-          endIndex += lineColMatch[0].length;
-        }
-      }
-
-      // 添加到结果（避免重复）
-      const isDuplicate = results.some(r => r.path === path);
-      const isUrl = /^https?:\/\/|^ftp:\/\/|^ftps:\/\/|^file:\/\//.test(path);
-      if (!isDuplicate && !isUrl) {
-        results.push({
-          path: path,
-          startIndex: startIndex,
-          length: endIndex - startIndex,
-          line: line,
-          column: column,
-          isPrefixPath: prefix && path.startsWith(prefix)
-        });
-
-        logger.debug(`找到路径: ${path}, 位置: ${startIndex}-${endIndex}`);
+    // 记录 URL 位置
+    const urlMatches = new Set();
+    let urlMatch;
+    while ((urlMatch = urlPattern.exec(text)) !== null) {
+      for (let i = urlMatch.index; i < urlMatch.index + urlMatch[0].length; i++) {
+        urlMatches.add(i);
       }
     }
 
-    // 步骤3: 如果上述方法没有找到路径，尝试使用正则表达式
-    if (results.length === 0) {
-      logger.debug('使用分割方法未找到路径，尝试使用正则表达式');
-
-      // 创建正则表达式列表
-      const regexList = [];
-
-      // 如果有前缀，添加前缀路径正则表达式
-      if (prefix) {
-        const escapedPrefix = escapeRegExp(prefix);
-        regexList.push(new RegExp(`(${escapedPrefix}[^\\s:"'<>|,;()\\[\\]{}]*)`, 'g'));
+    // 定义不同类型的路径匹配模式
+    const patterns = [
+      // 1. 标准 Unix 路径（以 / 或 ~/ 开头）
+      {
+        pattern: /((?:\/|~\/)[a-zA-Z0-9_/.-]+)(?::(\d+))?(?::(\d+))?/g,
+        type: 'unix'
+      },
+      // 2. CMake 错误格式
+      {
+        pattern: /(?:^|\s)([a-zA-Z0-9_/.-]+(?:\.(?:cpp|hpp|c|h|cc|cxx|hxx|cmake|txt))?)(?:\((\d+)(?:,(\d+))?\)):/g,
+        type: 'cmake'
+      },
+      // 3. Make/GCC 错误格式（包括相对路径）
+      {
+        pattern: /(?:^|\s)((?:\.{1,2}\/)?[a-zA-Z0-9_/.-]+(?:\.(?:cpp|hpp|c|h|cc|cxx|hxx|mk|in))?)(?::(\d+)(?::(\d+))?):(?:\s+(?:error|warning|note):|$)/g,
+        type: 'make'
+      },
+      // 4. 相对路径格式（以 ./ 或 ../ 开头）
+      {
+        pattern: /((?:\.{1,2}\/)[a-zA-Z0-9_/.-]+)(?::(\d+))?(?::(\d+))?/g,
+        type: 'relative'
       }
+    ];
 
-      // 添加通用 Unix 路径正则表达式
-      regexList.push(/\/([\w\-\.]+\/)+[\w\-\._]*/g);
-
-      // 遍历每个正则表达式
-      for (const regex of regexList) {
-        let match;
-
-        while ((match = regex.exec(text)) !== null) {
-          let path = match[0];
-
-          // 清理路径
-          path = cleanupPath(path);
-
-          // 如果是前缀路径，确保路径至少包含前缀和一个额外的路径段
-          if (prefix && path.startsWith(prefix) &&
-            (path.length <= prefix.length || !path.includes('/', prefix.length))) {
-            continue;
-          }
-
-          const startIndex = match.index;
-          let endIndex = startIndex + path.length;
-
-          // 检查是否有行列号
-          let line = undefined;
-          let column = undefined;
-
-          if (endIndex < text.length) {
-            const afterPath = text.substring(endIndex);
-            const lineColMatch = afterPath.match(/^:(\d+)(?::(\d+))?/);
-
-            if (lineColMatch) {
-              line = parseInt(lineColMatch[1]) - 1;
-              if (lineColMatch[2]) {
-                column = parseInt(lineColMatch[2]) - 1;
-              }
-
-              // 调整匹配长度以包含行列号
-              endIndex += lineColMatch[0].length;
-            }
-          }
-
-          // 添加到结果（避免重复）
-          const isDuplicate = results.some(r => r.path === path);
-          const isUrl = /^https?:\/\/|^ftp:\/\/|^ftps:\/\/|^file:\/\//.test(path);
-          if (!isDuplicate && !isUrl) {
-            results.push({
-              path: path,
-              startIndex: startIndex,
-              length: endIndex - startIndex,
-              line: line,
-              column: column,
-              isPrefixPath: prefix && path.startsWith(prefix)
-            });
-
-            logger.debug(`使用正则表达式找到路径: ${path}, 位置: ${startIndex}-${endIndex}`);
+    // 处理每种模式
+    for (const { pattern, type } of patterns) {
+      let match;
+      while ((match = pattern.exec(text)) !== null) {
+        // 检查是否与 URL 重叠
+        let isPartOfUrl = false;
+        for (let i = match.index; i < match.index + match[0].length; i++) {
+          if (urlMatches.has(i)) {
+            isPartOfUrl = true;
+            break;
           }
         }
+
+        if (isPartOfUrl) {
+          logger.debug(`跳过 URL 的一部分: ${match[0]}`);
+          continue;
+        }
+
+        const [fullMatch, path, lineStr, colStr] = match;
+        let processedPath = path;
+
+        // 提取文件名和行列号信息
+        const fileName = path.split(/[\/\\]/).pop();
+        const line = lineStr ? parseInt(lineStr, 10) : undefined;
+        const column = colStr ? parseInt(colStr, 10) : undefined;
+
+        // 创建搜索信息对象
+        const searchInfo = fileName ? {
+          fileName,
+          pattern: `**/${fileName}`,
+          line,
+          column
+        } : null;
+
+        // 处理路径
+        if (processedPath.startsWith('/') || processedPath.startsWith('~/')) {
+          // 绝对路径，保持原样
+          results.push({
+            path: processedPath,
+            startIndex: match.index,
+            length: fullMatch.length,
+            line,
+            column,
+            type,
+            searchInfo
+          });
+        } else if (processedPath.startsWith('./') || processedPath.startsWith('../')) {
+          // 相对路径，尝试转换为绝对路径
+          if (vscode.workspace.workspaceFolders?.length > 0) {
+            const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+            const absolutePath = path.startsWith('.')
+              ? path.replace(/^\.\//, '') // 移除开头的 ./
+              : path;
+
+            results.push({
+              path: absolutePath, // 保持相对路径格式
+              startIndex: match.index,
+              length: fullMatch.length,
+              line,
+              column,
+              type,
+              searchInfo,
+              isRelative: true,
+              workspaceRoot
+            });
+          } else {
+            // 如果没有工作区，只添加搜索信息
+            results.push({
+              path: null,
+              startIndex: match.index,
+              length: fullMatch.length,
+              line,
+              column,
+              type,
+              searchInfo
+            });
+          }
+        } else {
+          // 其他格式的路径（可能是编译错误输出等）
+          results.push({
+            path: null,
+            startIndex: match.index,
+            length: fullMatch.length,
+            line,
+            column,
+            type,
+            searchInfo
+          });
+        }
+
+        logger.debug(`找到路径 [${type}]: ${processedPath}${line ? `:${line}` : ''}${column ? `:${column}` : ''}`);
       }
     }
   } catch (error) {
     logger.error(`查找路径时出错: ${error.message}`);
   }
-
   return results;
 }
 
-/**
- * 清理路径，移除尾部的标点符号等
- * @param {string} path - 要清理的路径
- * @returns {string} - 清理后的路径
- */
-function cleanupPath(path) {
-  // 移除尾部的标点符号
-  path = path.replace(/[.,;:'"!?]+$/, '');
+// 添加辅助函数来提取文件信息
+function extractFileInfo(filePath) {
+  try {
+    // 移除开头的 ./ 或 ../
+    const cleanPath = filePath.replace(/^(?:\.\.?\/)+/, '');
 
-  // 确保路径不以 / 结尾
-  if (path.endsWith('/')) {
-    path = path.slice(0, -1);
+    // 匹配行号和列号
+    const match = cleanPath.match(/^(.+?)(?::(\d+))?(?::(\d+))?$/);
+    if (match) {
+      return {
+        fileName: path.basename(match[1]),
+        line: match[2] ? parseInt(match[2], 10) : undefined,
+        column: match[3] ? parseInt(match[3], 10) : undefined
+      };
+    }
+
+    return {
+      fileName: path.basename(cleanPath),
+      line: undefined,
+      column: undefined
+    };
+  } catch (error) {
+    logger.error(`提取文件信息时出错: ${error.message}`);
+    return {
+      fileName: path.basename(filePath),
+      line: undefined,
+      column: undefined
+    };
   }
-
-  return path;
 }
 
-/**
- * 转义正则表达式特殊字符
- * @param {string} string - 要转义的字符串
- * @returns {string} - 转义后的字符串
- */
-function escapeRegExp(string) {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// 添加辅助函数来搜索和打开文件
+async function searchAndOpenFile(fileName, line, column) {
+  try {
+    logger.info(`尝试通过搜索打开文件: ${fileName}`);
+
+    // 先尝试在工作区中精确匹配
+    const files = await vscode.workspace.findFiles(`**/${fileName}`, null, 5);
+
+    if (files.length === 0) {
+      // 如果没找到，打开搜索框
+      logger.info(`未找到文件 ${fileName}，打开搜索框`);
+      await vscode.commands.executeCommand('workbench.action.quickOpen', fileName);
+    } else if (files.length === 1) {
+      // 如果只找到一个，直接打开
+      const document = await vscode.workspace.openTextDocument(files[0]);
+      const editor = await vscode.window.showTextDocument(document);
+      if (line !== undefined) {
+        const position = new vscode.Position(line - 1, column || 0);
+        editor.selection = new vscode.Selection(position, position);
+        editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+      }
+    } else {
+      // 如果找到多个，让用户选择
+      const items = files.map(file => ({
+        label: path.basename(file.fsPath),
+        description: vscode.workspace.asRelativePath(file.fsPath),
+        file
+      }));
+
+      const selected = await vscode.window.showQuickPick(items, {
+        placeHolder: '选择要打开的文件'
+      });
+
+      if (selected) {
+        const document = await vscode.workspace.openTextDocument(selected.file);
+        const editor = await vscode.window.showTextDocument(document);
+        if (line !== undefined) {
+          const position = new vscode.Position(line - 1, column || 0);
+          editor.selection = new vscode.Selection(position, position);
+          editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+        }
+      }
+    }
+  } catch (error) {
+    logger.error(`搜索和打开文件时出错: ${error.message}`);
+    // 作为最后的后备方案，直接打开搜索框
+    await vscode.commands.executeCommand('workbench.action.quickOpen', fileName);
+  }
 }
 
 // 导出激活和停用函数

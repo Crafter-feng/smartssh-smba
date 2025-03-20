@@ -450,7 +450,7 @@ class ServerTreeProvider {
       return [this.createNoMappingItem('没有有效的 SMB 映射')];
     }
     
-    // 创建映射组和子项
+    // 创建映射组
     return this.createSmbMappingGroups(validMappings);
   }
 
@@ -471,37 +471,22 @@ class ServerTreeProvider {
    * @returns {Array} - SMB映射树项列表
    */
   createSmbMappingGroups(mappings) {
-    const items = [];
-    
-    mappings.forEach((mapping, index) => {
-      // 创建映射组标题
-      const groupTitle = this.formatMappingTitle(mapping, index);
-      const groupItem = new vscode.TreeItem(groupTitle, vscode.TreeItemCollapsibleState.Collapsed);
+    return mappings.map((mapping, index) => {
+      // 使用本地路径作为标题，远程路径作为描述
+      const title = `本地 ${mapping.localPath || '未指定'}`;
+      const description = `映射到 ${mapping.remotePath || '未指定'}`;
+      
+      const groupItem = new vscode.TreeItem(title, vscode.TreeItemCollapsibleState.Collapsed);
+      groupItem.description = description;
       groupItem.contextValue = 'smb-mapping';
       groupItem.iconPath = new vscode.ThemeIcon('link');
       groupItem.mapping = mapping; // 存储映射数据供上下文菜单使用
       
-      // 添加映射组到结果列表
-      items.push(groupItem);
+      // 设置工具提示
+      groupItem.tooltip = `路径映射\n本地路径: ${title}\n远程路径: ${description}`;
       
-      // 添加路径子项
-      items.push(...this.createMappingPathItems(mapping));
+      return groupItem;
     });
-    
-    return items;
-  }
-
-  /**
-   * 格式化映射标题
-   * @param {Object} mapping - 映射对象
-   * @param {number} index - 映射索引
-   * @returns {string} - 格式化的标题
-   */
-  formatMappingTitle(mapping, index) {
-    // 如果有描述，则包含在标题中
-    return mapping.description 
-      ? `映射 ${index + 1} (${mapping.description})` 
-      : `映射 ${index + 1}`;
   }
 
   /**
@@ -558,12 +543,7 @@ class ServerTreeProvider {
       ? `映射的本地路径: ${path}` 
       : `映射的远程路径: ${path}`;
       
-    // 为路径项添加点击操作（可以打开路径或复制路径）
-    pathItem.command = {
-      command: isLocal ? 'smartssh-smba.openLocalPath' : 'smartssh-smba.copyRemotePath',
-      title: isLocal ? '打开本地路径' : '复制远程路径',
-      arguments: [path]
-    };
+    pathItem.command = null;
     
     return pathItem;
   }
