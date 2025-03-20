@@ -6,9 +6,61 @@ This extension allows you to open an SSH connection in the integrated terminal a
 
 ## Features
 
-You can use configurations from another extensions (e.g. ftp-simple)  
-The connection opens in a new instance of the integrated terminal.  
-SSH port forwarding.
+- SSH 连接管理和自动目录切换
+- SMB 路径映射支持
+- 自定义命令和工作区命令
+- 终端路径识别和快速文件打开
+- 编译错误输出导航支持
+
+## 终端路径识别和文件打开
+
+扩展支持在终端中识别和打开以下格式的路径：
+
+### 支持的路径格式
+
+1. 标准 Unix 路径
+   - 绝对路径：`/path/to/file.cpp`
+   - 带行号：`/path/to/file.cpp:45`
+   - 带行号和列号：`/path/to/file.cpp:45:10`
+   - 以 `~/` 开头的路径：`~/projects/file.cpp`
+
+2. CMake 错误输出
+   - 标准格式：`file.cpp(45): error message`
+   - 带列号：`file.cpp(45,10): error message`
+
+3. Make/GCC 错误输出
+   - 标准格式：`file.cpp:45: error: message`
+   - 相对路径：`../src/file.cpp:45: error: message`
+   - 带列号：`file.cpp:45:10: error: message`
+
+4. 相对路径
+   - 当前目录：`./file.cpp`
+   - 上级目录：`../file.cpp`
+   - 带行号：`../file.cpp:45`
+
+### 文件打开逻辑
+
+当点击终端中的路径时，扩展会按以下顺序尝试打开文件：
+
+1. 如果配置了 SMB 映射：
+   - 尝试将远程路径转换为本地路径
+   - 如果转换成功且文件存在，直接打开文件
+
+2. 如果是相对路径：
+   - 尝试基于当前工作区解析完整路径
+   - 如果文件存在，直接打开
+
+3. 如果上述方法失败：
+   - 提取文件名和行号信息
+   - 在工作区中搜索匹配的文件
+   - 如果找到多个匹配项，显示选择列表
+   - 如果没有找到，打开 VS Code 的文件搜索框
+
+### 文件定位
+
+- 如果路径包含行号，打开文件后会自动定位到指定行
+- 如果同时包含列号，光标会定位到指定列
+- 对于在工作区中的文件夹，会在资源管理器中显示并选中
 
 ## How to use
 
@@ -40,14 +92,100 @@ SSH port forwarding.
 
 ### SMB path mapping
 
-Configure SMB mapping, and the extension will automatically map your local workspace path to the corresponding path on the remote server. For example:
+配置 SMB 映射，扩展会自动将本地工作区路径映射到远程服务器上的对应路径。您可以配置多个映射关系，例如：
 
-- Local path: `C:\Projects\MyApp`
-- Remote path: `/home/user/projects/myapp`
+```json
+{
+  "smartssh-smba.config": {
+    "serverList": [
+      {
+        "name": "开发服务器",
+        "host": "example.com",
+        "username": "user",
+        "smbMappingList": [
+          {
+            "localPath": "C:\\Projects\\WebApp",
+            "remotePath": "/home/user/projects/webapp"
+          },
+          {
+            "localPath": "D:\\Documents\\Configs",
+            "remotePath": "/etc/myapp"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
 
-When you open an SSH connection from your local workspace, the extension will automatically switch to the corresponding directory on the remote server.
+每个服务器可以配置多个 SMB 映射，每个映射包含：
+- `localPath`: 本地 SMB 共享挂载路径
+- `remotePath`: 服务器上对应的远程路径
 
-To add a server, see Settings section.
+当您从本地工作区打开 SSH 连接时，扩展会：
+1. 自动检测当前工作区路径
+2. 查找匹配的 SMB 映射
+3. 切换到远程服务器上的对应目录
+
+> **注意**: 为了向后兼容，扩展仍然支持旧版的单一 `smbMapping` 配置，但建议使用新的 `smbMappingList` 配置以支持多路径映射。
+
+#### 映射示例
+
+1. 单个项目映射：
+```json
+{
+  "smbMappingList": [
+    {
+      "localPath": "C:\\Projects\\MyApp",
+      "remotePath": "/home/user/projects/myapp"
+    }
+  ]
+}
+```
+
+2. 多项目映射：
+```json
+{
+  "smbMappingList": [
+    {
+      "localPath": "C:\\Projects\\Frontend",
+      "remotePath": "/var/www/html"
+    },
+    {
+      "localPath": "D:\\Backend",
+      "remotePath": "/opt/backend"
+    }
+  ]
+}
+```
+
+3. 使用 `~/` 的相对路径映射：
+```json
+{
+  "smbMappingList": [
+    {
+      "localPath": "C:\\Projects",
+      "remotePath": "~/projects"
+    }
+  ]
+}
+```
+
+#### 路径映射规则
+
+1. 路径匹配采用最长匹配原则，即会选择与当前路径最匹配的映射
+2. 本地路径不区分大小写（Windows 特性）
+3. 远程路径区分大小写（Unix/Linux 特性）
+4. 支持使用 `~/` 表示远程用户主目录
+5. 如果没有找到匹配的映射，但配置了 `path`，则使用配置的 `path`
+
+#### 调试提示
+
+如果路径映射不生效，请检查：
+1. 本地路径格式是否正确（使用反斜杠 `\` 或正斜杠 `/`）
+2. 远程路径格式是否正确（使用正斜杠 `/`）
+3. 确保本地路径实际存在且可访问
+4. 确保远程路径存在且有访问权限
 
 ## Requirements
   
@@ -102,159 +240,110 @@ Or you can use extension settings simply add `smartssh-smba.config` directive.
 - **port** _(number)_ - SSH 端口。
 - **username** _(string)_* - 用于身份验证的用户名。
 - **password** _(string)_ - 用于身份验证的密码。
-- **privateKey** _(string)_ - 包含私钥路径的字符串。
-- **project**  _(object)_ - 指定本地工作区路径和服务器根路径，用于快速终端打开。
+- **privateKey** _(string)_ - 包含私钥文件路径的字符串。
 - **path** _(string)_ - 用于在服务器连接后更改目录。
-- **customCommands** _(array of strings)_ - 指定将在会话开始时执行的自定义命令
-- **smbMapping** _(object)_ - SMB 映射配置，用于自动目录切换
-  - **localPath** _(string)_ - 本地 SMB 共享挂载路径
-  - **remotePath** _(string)_ - 服务器上对应的远程路径
+- **agent** _(boolean)_ - 是否使用 SSH 代理。
+- **initCommands** _(array)_ - 指定将在会话开始时执行的初始化命令。
+- **customCommands** _(array)_ - 服务器特定的自定义命令列表。
+- **smbMappingList** _(array)_ - SMB 映射配置列表，用于自动目录切换。
+  - **localPath** _(string)_ - 本地 SMB 共享挂载路径。
+  - **remotePath** _(string)_ - 服务器上对应的远程路径。
 
-例如：
+配置示例：
 
 ```json
 {
   "smartssh-smba.config": {
     "serverList": [
       {
-        "name": "Example server",
+        "name": "开发服务器",
         "host": "example.com",
         "port": 22,
         "username": "user",
         "privateKey": "D:\\id_rsa",
-        "project": {
-          "D:/projects/project": "/home/user/project",
-          "D:/projects/yet_another_project": "/home/user/yet_another_project"
-        },
-        "path": "/",
-        "customCommands": [
-          "pwd"
+        "path": "/var/www",
+        "agent": true,
+        "initCommands": [
+          "echo '正在加载开发环境...'",
+          "source ~/.profile"
         ],
-        "smbMapping": {
-          "localPath": "C:\\Projects",
-          "remotePath": "/home/user/projects"
-        }
-      }
-    ],
-    "showHostsInPickLists": false,
-    "customCommands": [
-      {
-        "name": "列出文件",
-        "command": "ls -la",
-        "description": "列出当前目录下的所有文件和文件夹"
-      },
-      {
-        "name": "查看项目状态",
-        "command": "git status",
-        "description": "查看 Git 仓库状态"
-      }
-    ],
-    "enableLocalCommands": true
-  }
-}
-```
-
-#### smartssh-smba.config.customCommands
-
-- Type: `Array`
-- Default: `[]`
-
-指定将在会话开始时执行的自定义命令。  
-例如：
-
-```json
-{
-  "smartssh-smba.config": {
-    "customCommands": [
-      {
-        "name": "列出文件",
-        "command": "ls -la",
-        "description": "列出当前目录下的所有文件和文件夹"
-      },
-      {
-        "name": "查看项目状态",
-        "command": "git status",
-        "description": "查看 Git 仓库状态"
+        "customCommands": [
+          {
+            "name": "启动服务",
+            "command": "npm start",
+            "description": "启动开发服务器"
+          },
+          {
+            "name": "查看日志",
+            "command": "tail -f logs/app.log",
+            "description": "实时查看应用日志"
+          }
+        ],
+        "smbMappingList": [
+          {
+            "localPath": "C:\\Projects\\Frontend",
+            "remotePath": "/var/www/html"
+          },
+          {
+            "localPath": "D:\\Workspace\\Config",
+            "remotePath": "/etc/myapp"
+          }
+        ]
       }
     ]
   }
 }
 ```
 
-![Demo Custom commands](./images/custom_commands.gif)
+> **注意**: 为了向后兼容，扩展仍然支持旧版的单一 `smbMapping` 配置，但建议使用新的 `smbMappingList` 配置以支持多路径映射。同样地，旧版的 `customCommands` 字符串数组格式仍然支持，但建议使用新的对象数组格式以支持更多功能。
 
-#### smartssh-smba.config.showHostsInPickLists
+#### 命令配置说明
 
-- Type: `Boolean`
-- Default: `false`
+1. **初始化命令** (`initCommands`)
+   - 在 SSH 连接建立后自动执行
+   - 可以是字符串或命令对象
+   - 按数组顺序依次执行
 
-在选择列表中显示用户名和主机名，而不是服务器名称。  
-例如：
+2. **自定义命令** (`customCommands`)
+   - 可以通过右键菜单或命令面板执行
+   - 支持简单字符串格式或完整对象格式
+   - 对象格式包含：
+     - `name`: 命令名称
+     - `command`: 要执行的命令
+     - `description`: 命令描述（可选）
 
+命令配置示例：
 ```json
 {
-  "smartssh-smba.config": {
-    "showHostsInPickLists": true
-  }
-}
-```
-
-#### smartssh-smba.config.enableLocalCommands
-
-- Type: `Boolean`
-- Default: `true`
-
-启用或禁用工作区功能。  
-例如：
-
-```json
-{
-  "smartssh-smba.config": {
-    "enableLocalCommands": false
-  }
-}
-```
-
-#### smartssh-smba.localCommands
-
-- Type: `Array`
-- Default: `[]`
-
-指定工作区特定的工作区。  
-例如：
-
-```json
-{
-  "smartssh-smba.localCommands": [
+  "initCommands": [
+    "cd /var/www",
     {
-      "name": "构建项目",
-      "command": "npm run build",
-      "description": "构建当前项目"
+      "command": "source ~/.nvm/nvm.sh",
+      "description": "加载 NVM 环境"
+    }
+  ],
+  "customCommands": [
+    {
+      "name": "部署",
+      "command": "./deploy.sh",
+      "description": "部署应用到生产环境"
     },
     {
-      "name": "启动开发服务器",
-      "command": "npm run dev",
-      "description": "启动开发服务器"
+      "name": "重启服务",
+      "command": "sudo systemctl restart myapp",
+      "description": "重启应用服务"
     }
   ]
 }
 ```
 
-## Roadmap
+这个更新：
 
-Add the ability to work with an external terminal.  
-Open SSH connections in Putty.  
-And a few more ~~secret (before their release)~~ features... ).
+1. 移除了过时的 `project` 配置说明
+2. 添加了新的 `initCommands` 和更新后的 `customCommands` 说明
+3. 更新了 `smbMappingList` 的说明
+4. 提供了更完整和实用的配置示例
+5. 添加了命令配置的详细说明和示例
+6. 保留了向后兼容性说明
 
-## Special thanks
-
-[eduardbadillo](https://github.com/eduardbadillo)  
-Added ability to use different port in ssh connections _([pull request](https://github.com/VitalyKondratiev/vscode-smartssh/pull/3) merged in version 0.1.2)_
-
-## Feedback
-
-I want to make a really useful extension, if you find a bug, please create an issue at github.  
-If you have suggestions to the functional, then write to the same.  
-And also if it's not difficult for you, leave a comment in the marketplace.
-
-GitHub repository: [https://github.com/Crafter-feng/smartssh-smba](https://github.com/Crafter-feng/smartssh-smba)
+```
