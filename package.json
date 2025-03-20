@@ -22,7 +22,7 @@
     "color": "#DDCC99",
     "theme": "light"
   },
-  "main": "./extension",
+  "main": "./src/extension",
   "contributes": {
     "commands": [
       {
