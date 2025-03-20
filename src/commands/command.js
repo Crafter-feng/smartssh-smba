@@ -4,9 +4,9 @@
  */
 
 const vscode = require('vscode');
-const configLoader = require('../../adapters/config-loader');
+const configLoader = require('../adapters/config-loader');
 const terminalManager = require('../services/terminal-manager');
-const { logger } = require('../../adapters/logger');
+const { logger } = require('../utils/logger');
 
 /**
  * 添加命令

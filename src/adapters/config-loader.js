@@ -6,11 +6,137 @@
 const vscode = require('vscode');
 const fs = require('fs').promises;
 const path = require('path');
+const homedir = require('os').homedir();
+const fsSync = require('fs');
 const { logger } = require('../utils/logger');
 
 // 全局配置缓存
 let configCache = null;
 let workspaceConfigCache = null;
+let lastLoadTime = 0;
+const CACHE_TTL = 1000; // 1秒缓存有效期
+
+/**
+ * 格式化服务器配置元素
+ * @param {Object} element - 服务器配置元素
+ * @returns {Object} - 格式化后的配置
+ */
+function formatServerConfig(element) {
+  var show_hosts = vscode.workspace.getConfiguration('smartssh-smba').showHostsInPickLists;
+  var config = {
+    name: (show_hosts) ? element.username + '@' + element.host : element.name, // 用于服务器列表
+    username: element.username, // 用于授权
+    password: element.password, // 用于授权（可以为undefined）
+    host: element.host, // 用于授权
+    port: element.port, // 用于授权（可以为undefined）
+    privateKey: element.privateKey, // 用于授权（可以为undefined）
+    agent: element.agent, // 用于授权（可以为undefined）
+    customCommands: element.customCommands, // 用于指定会话开始时执行的命令
+    smbMappingList: [], // 初始化为空数组
+  };
+
+  // 保存已添加路径的映射，防止重复
+  const addedMappings = new Set();
+
+  // 合并 smbMapping 到 smbMappingList
+  if (element.smbMapping && (element.smbMapping.localPath || element.smbMapping.remotePath)) {
+    const mappingKey = `${element.smbMapping.localPath || ''}:${element.smbMapping.remotePath || ''}`;
+    if (!addedMappings.has(mappingKey)) {
+      config.smbMappingList.push({
+        localPath: element.smbMapping.localPath,
+        remotePath: element.smbMapping.remotePath,
+      });
+      addedMappings.add(mappingKey);
+    }
+  }
+
+  // 添加新的 smbMappingList
+  if (element.smbMappingList && Array.isArray(element.smbMappingList)) {
+    element.smbMappingList.forEach(mapping => {
+      if (mapping && (mapping.localPath || mapping.remotePath)) {
+        const mappingKey = `${mapping.localPath || ''}:${mapping.remotePath || ''}`;
+        if (!addedMappings.has(mappingKey)) {
+          config.smbMappingList.push({
+            localPath: mapping.localPath,
+            remotePath: mapping.remotePath,
+          });
+          addedMappings.add(mappingKey);
+        }
+      }
+    });
+  }
+
+  return config;
+}
+
+// 路径连接函数
+function pathjoin() {
+  return path.normalize(path.join.apply(this, arguments)).replace(/\\/g, '/');
+}
+
+// 获取用户设置位置
+function getUserSettingsLocation(filename) {
+  var folder = process.env.APPDATA || (process.platform == 'darwin' ? process.env.HOME + '/Library/Application Support' : process.platform == 'linux' ? pathjoin(homedir, '.config') : '/var/local');
+  if (/^[A-Z]:[/\\]/.test(folder)) folder = folder.substring(0, 1).toLowerCase() + folder.substring(1);
+  return pathjoin(folder, '/Code/User/', filename ? filename : '');
+}
+
+// 检查文件是否存在
+function fileExists(filename, local = false) {
+  var result = true;
+  if (fsSync.accessSync) {
+    try {
+      fsSync.accessSync(
+        (!local) ? getUserSettingsLocation(filename) : filename
+      );
+    } catch (e) {
+      result = false;
+    }
+  } else {
+    result = fsSync.existsSync(
+      (!local) ? getUserSettingsLocation(filename) : filename
+    );
+  }
+  return result;
+}
+
+/**
+ * 加载smartssh-smba配置
+ * @returns {Object} - 配置对象
+ */
+function loadSmartSshConfig() {
+  try {
+    // 获取整合后的配置
+    const config = vscode.workspace.getConfiguration('smartssh-smba');
+    const integratedConfig = config.get('config') || {
+      showHostsInPickLists: false,
+      serverList: [],
+      customCommands: [],
+    };
+
+    // 从配置中获取服务器列表
+    const serverList = integratedConfig.serverList || [];
+
+    // 转换为所需格式
+    const configs = serverList.map(server => {
+      return {
+        name: server.name,
+        configuration: server,
+      };
+    });
+
+    return {
+      result: true,
+      configs: configs,
+    };
+  } catch (error) {
+    logger.error('加载 SmartSSH-SMBA 配置时出错:', error);
+    return {
+      result: false,
+      configs: [],
+    };
+  }
+}
 
 /**
  * 获取扩展配置

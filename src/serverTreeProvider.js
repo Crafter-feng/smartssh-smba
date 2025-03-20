@@ -1,8 +1,8 @@
 /* eslint-disable @stylistic/no-trailing-spaces */
 /* eslint-disable @stylistic/comma-dangle */
 const vscode = require('vscode');
-const configLoader = require('../adapters/config-loader');
-const { logger } = require('../adapters/logger');
+const configLoader = require('./adapters/config-loader');
+const { logger } = require('./utils/logger');
 
 /**
  * 获取适当的图标

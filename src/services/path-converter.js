@@ -6,7 +6,7 @@
 const vscode = require('vscode');
 const path = require('path');
 const fs = require('fs').promises;
-const configLoader = require('../../adapters/config-loader');
+const configLoader = require('../adapters/config-loader');
 const { logger } = require('../utils/logger');
 
 /**

@@ -11,7 +11,7 @@ const terminalManager = require('./terminal-manager');
 const pathConverter = require('./path-converter');
 const { logger } = require('../utils/logger');
 const commandExistsSync = require('command-exists').sync;
-const configLoader = require('../../adapters/config-loader');
+const configLoader = require('../adapters/config-loader');
 
 /**
  * 建立SSH连接
