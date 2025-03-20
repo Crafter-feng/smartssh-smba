@@ -33,19 +33,19 @@ function convertRemotePathToLocal(remotePath, server) {
     // 尝试每个路径映射
     for (const mapping of pathMappings) {
       const remotePathPrefix = normalizePath(mapping.remotePath);
-      
+
       // 检查远程路径是否以映射的远程路径开头
       if (normalizedRemotePath.startsWith(remotePathPrefix)) {
         // 提取相对路径
         const relativePath = normalizedRemotePath.substring(remotePathPrefix.length);
-        
+
         // 构建本地路径
         const localPathPrefix = normalizePath(mapping.localPath);
         let localPath = path.join(localPathPrefix, relativePath);
-        
+
         // 确保使用正确的路径分隔符
         localPath = normalizePath(localPath);
-        
+
         logger.debug(`路径转换: ${remotePath} -> ${localPath}`);
         return localPath;
       }
@@ -82,19 +82,19 @@ function convertLocalPathToRemote(localPath, server) {
     // 尝试每个路径映射
     for (const mapping of pathMappings) {
       const localPathPrefix = normalizePath(mapping.localPath);
-      
+
       // 检查本地路径是否以映射的本地路径开头
       if (normalizedLocalPath.startsWith(localPathPrefix)) {
         // 提取相对路径
         const relativePath = normalizedLocalPath.substring(localPathPrefix.length);
-        
+
         // 构建远程路径
         const remotePathPrefix = normalizePath(mapping.remotePath);
         let remotePath = remotePathPrefix + relativePath.replace(/\\/g, '/');
-        
+
         // 确保使用正确的路径分隔符（远程总是使用正斜杠）
         remotePath = normalizePath(remotePath);
-        
+
         logger.debug(`路径转换: ${localPath} -> ${remotePath}`);
         return remotePath;
       }
@@ -131,7 +131,7 @@ function findServerForPath(filePath) {
     for (const server of servers) {
       // 获取路径映射
       const pathMappings = getPathMappings(server);
-      
+
       // 如果服务器没有路径映射，跳过
       if (!pathMappings || pathMappings.length === 0) {
         continue;
@@ -140,7 +140,7 @@ function findServerForPath(filePath) {
       // 检查每个路径映射
       for (const mapping of pathMappings) {
         const localPathPrefix = normalizePath(mapping.localPath);
-        
+
         // 如果文件路径以本地路径前缀开头，则找到匹配
         if (normalizedFilePath.startsWith(localPathPrefix)) {
           return server;
@@ -192,15 +192,15 @@ function getPathMappings(server) {
  */
 function normalizePath(p) {
   if (!p) return '';
-  
+
   // 将所有反斜杠替换为正斜杠
   let normalized = p.replace(/\\/g, '/');
-  
+
   // 确保路径以斜杠结尾
   if (!normalized.endsWith('/')) {
     normalized += '/';
   }
-  
+
   return normalized;
 }
 

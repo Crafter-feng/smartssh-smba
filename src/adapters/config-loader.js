@@ -232,7 +232,7 @@ async function ensureWorkspaceConfigExists() {
     } catch (error) {
       // 文件不存在，创建新文件
       await fs.writeFile(configPath, JSON.stringify({
-        customCommands: []
+        customCommands: [],
       }, null, 2));
       
       return true;
