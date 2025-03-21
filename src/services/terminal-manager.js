@@ -4,7 +4,7 @@
  */
 
 const vscode = require('vscode');
-const { logger } = require('../../adapters/logger');
+const { logger } = require('../utils/logger');
 
 // 终端管理器
 class TerminalManager {

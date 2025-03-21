@@ -335,15 +335,3 @@ Or you can use extension settings simply add `smartssh-smba.config` directive.
     }
   ]
 }
-```
-
-这个更新：
-
-1. 移除了过时的 `project` 配置说明
-2. 添加了新的 `initCommands` 和更新后的 `customCommands` 说明
-3. 更新了 `smbMappingList` 的说明
-4. 提供了更完整和实用的配置示例
-5. 添加了命令配置的详细说明和示例
-6. 保留了向后兼容性说明
-
-```

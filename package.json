@@ -213,6 +213,7 @@
                     "description": "路径映射配置列表",
                     "items": {
                       "type": "object",
+                      "required": ["localPath", "remotePath"],
                       "properties": {
                         "localPath": {
                           "type": "string",
@@ -238,26 +239,8 @@
                         "description": "远程路径 (已弃用，请使用 pathMappings)"
                       }
                     },
-                    "description": "SMB路径映射配置 (已弃用，请使用 pathMappings)"
-                  },
-                  "smbMappingList": {
-                    "type": "array",
-                    "default": [],
-                    "description": "SMB路径映射配置列表",
-                    "items": {
-                      "type": "object",
-                      "required": ["localPath", "remotePath"],
-                      "properties": {
-                        "localPath": {
-                          "type": "string",
-                          "description": "本地路径"
-                        },
-                        "remotePath": {
-                          "type": "string",
-                          "description": "远程路径"
-                        }
-                      }
-                    }
+                    "description": "SMB路径映射配置 (已弃用，请使用 pathMappings)",
+                    "deprecated": true
                   },
                   "customCommands": {
                     "type": "array",
@@ -431,7 +414,10 @@
     "url": "https://github.com/Crafter-feng/smartssh-smba/issues"
   },
   "scripts": {
-    "lint": "eslint --fix"
+    "lint": "eslint --fix",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
   },
   "dependencies": {
     "command-exists": "^1.2.9",
@@ -445,6 +431,7 @@
     "@types/node": "^22.13.10",
     "@types/vscode": "^1.10.0",
     "eslint-config-final": "^1.5.9",
+    "jest": "^29.7.0",
     "mocha": "^11.1.0",
     "semantic-release-vsce": "^6.0.6",
     "typescript": "^5.8.2"

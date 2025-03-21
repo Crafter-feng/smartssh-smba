@@ -22,41 +22,26 @@ const CACHE_TTL = 1000; // 1秒缓存有效期
  * @returns {Object} - 格式化后的配置
  */
 function formatServerConfig(element) {
-  var show_hosts = vscode.workspace.getConfiguration('smartssh-smba').showHostsInPickLists;
-  var config = {
-    name: (show_hosts) ? element.username + '@' + element.host : element.name, // 用于服务器列表
-    username: element.username, // 用于授权
-    password: element.password, // 用于授权（可以为undefined）
+  const config = {
+    name: element.name, // 用于命名
     host: element.host, // 用于授权
     port: element.port, // 用于授权（可以为undefined）
     privateKey: element.privateKey, // 用于授权（可以为undefined）
     agent: element.agent, // 用于授权（可以为undefined）
     customCommands: element.customCommands, // 用于指定会话开始时执行的命令
-    smbMappingList: [], // 初始化为空数组
+    pathMappings: [], // 初始化为空数组
   };
 
   // 保存已添加路径的映射，防止重复
   const addedMappings = new Set();
 
-  // 合并 smbMapping 到 smbMappingList
-  if (element.smbMapping && (element.smbMapping.localPath || element.smbMapping.remotePath)) {
-    const mappingKey = `${element.smbMapping.localPath || ''}:${element.smbMapping.remotePath || ''}`;
-    if (!addedMappings.has(mappingKey)) {
-      config.smbMappingList.push({
-        localPath: element.smbMapping.localPath,
-        remotePath: element.smbMapping.remotePath,
-      });
-      addedMappings.add(mappingKey);
-    }
-  }
-
-  // 添加新的 smbMappingList
-  if (element.smbMappingList && Array.isArray(element.smbMappingList)) {
-    element.smbMappingList.forEach(mapping => {
+  // 处理新的pathMappings
+  if (element.pathMappings && Array.isArray(element.pathMappings)) {
+    element.pathMappings.forEach(mapping => {
       if (mapping && (mapping.localPath || mapping.remotePath)) {
         const mappingKey = `${mapping.localPath || ''}:${mapping.remotePath || ''}`;
         if (!addedMappings.has(mappingKey)) {
-          config.smbMappingList.push({
+          config.pathMappings.push({
             localPath: mapping.localPath,
             remotePath: mapping.remotePath,
           });
@@ -64,6 +49,18 @@ function formatServerConfig(element) {
         }
       }
     });
+  }
+
+  // 合并旧的 smbMapping 到 pathMappings (向后兼容)
+  if (element.smbMapping && (element.smbMapping.localPath || element.smbMapping.remotePath)) {
+    const mappingKey = `${element.smbMapping.localPath || ''}:${element.smbMapping.remotePath || ''}`;
+    if (!addedMappings.has(mappingKey)) {
+      config.pathMappings.push({
+        localPath: element.smbMapping.localPath,
+        remotePath: element.smbMapping.remotePath,
+      });
+      addedMappings.add(mappingKey);
+    }
   }
 
   return config;

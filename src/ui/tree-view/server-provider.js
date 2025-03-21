@@ -234,7 +234,6 @@ class ServerTreeProvider {
     // 添加路径映射组（如果有）
     const hasPathMappings = 
       (server.pathMappings && server.pathMappings.length > 0) ||
-      (server.smbMappingList && server.smbMappingList.length > 0) ||
       (server.smbMapping && server.smbMapping.localPath);
     
     if (hasPathMappings) {
@@ -335,31 +334,11 @@ class ServerTreeProvider {
       });
     }
     
-    // 处理旧的smbMappingList
-    if (server.smbMappingList && Array.isArray(server.smbMappingList)) {
-      server.smbMappingList.forEach((mapping, index) => {
-        nodes.push(
-          new ServerTreeItem(
-            `SMB映射 #${index + 1}`,
-            vscode.TreeItemCollapsibleState.None,
-            server,
-            'path-mapping',
-            null,
-            {
-              localPath: mapping.localPath,
-              remotePath: mapping.remotePath,
-              description: `${mapping.localPath} → ${mapping.remotePath}`
-            }
-          )
-        );
-      });
-    }
-    
-    // 处理旧的单个smbMapping
+    // 处理旧的单个smbMapping (向后兼容)
     if (server.smbMapping && server.smbMapping.localPath && server.smbMapping.remotePath) {
       nodes.push(
         new ServerTreeItem(
-          'SMB映射',
+          '映射 (旧版)',
           vscode.TreeItemCollapsibleState.None,
           server,
           'path-mapping',
@@ -367,7 +346,7 @@ class ServerTreeProvider {
           {
             localPath: server.smbMapping.localPath,
             remotePath: server.smbMapping.remotePath,
-            description: `${server.smbMapping.localPath} → ${server.smbMapping.remotePath}`
+            description: `${server.smbMapping.localPath} → ${server.smbMapping.remotePath} (请迁移到pathMappings)`
           }
         )
       );

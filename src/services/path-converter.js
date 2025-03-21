@@ -172,14 +172,11 @@ function getPathMappings(server) {
     pathMappings.push(...server.pathMappings);
   }
 
-  // 处理旧的smbMappingList数组（向后兼容）
-  if (server.smbMappingList && Array.isArray(server.smbMappingList)) {
-    pathMappings.push(...server.smbMappingList);
-  }
-
   // 处理旧的单个smbMapping（向后兼容）
   if (server.smbMapping && server.smbMapping.localPath && server.smbMapping.remotePath) {
     pathMappings.push(server.smbMapping);
+    // 记录日志以便告知使用新的配置
+    logger.debug(`服务器"${server.name}"使用了弃用的smbMapping配置，请迁移到pathMappings`);
   }
 
   return pathMappings;

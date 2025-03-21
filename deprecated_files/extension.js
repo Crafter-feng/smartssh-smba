@@ -8,7 +8,7 @@ const path = require('path');
 const commandExistsSync = require('command-exists').sync;
 const configLoader = require('./adapters/config-loader');
 const { ServerTreeProvider, CommandTreeProvider } = require('./src/serverTreeProvider');
-const { logger, LogLevel, LogTarget } = require('./adapters/logger');
+const { logger, LogLevel, LogTarget } = require('./src/utils/logger');
 
 // 全局变量
 let fastOpenConnectionButton = null;
@@ -2488,22 +2488,22 @@ function findPotentialPaths(text) {
     const patterns = [
       // 1. 标准 Unix 路径（以 / 或 ~/ 开头）
       {
-        pattern: /((?:\/|~\/)[a-zA-Z0-9_/.-]+)(?::(\d+))?(?::(\d+))?/g,
+        pattern: /((?:\/|~\/)[^:\s\(\)"']+)(?::(\d+))?(?::(\d+))?/g,
         type: 'unix'
       },
       // 2. CMake 错误格式
       {
-        pattern: /(?:^|\s)([a-zA-Z0-9_/.-]+(?:\.(?:cpp|hpp|c|h|cc|cxx|hxx|cmake|txt))?)(?:\((\d+)(?:,(\d+))?\)):/g,
+        pattern: /(?:^|\s)([^:\s\(\)"']+(?:\.(?:cpp|hpp|c|h|cc|cxx|hxx|cmake|txt))?)(?:\((\d+)(?:,(\d+))?\)):/g,
         type: 'cmake'
       },
       // 3. Make/GCC 错误格式（包括相对路径）
       {
-        pattern: /(?:^|\s)((?:\.{1,2}\/)?[a-zA-Z0-9_/.-]+(?:\.(?:cpp|hpp|c|h|cc|cxx|hxx|mk|in))?)(?::(\d+)(?::(\d+))?):(?:\s+(?:error|warning|note):|$)/g,
+        pattern: /(?:^|\s)((?:\.{1,2}\/)?[^:\s\(\)"']+(?:\.(?:cpp|hpp|c|h|cc|cxx|hxx|mk|in))?)(?::(\d+)(?::(\d+))?):(?:\s+(?:error|warning|note):|$)/g,
         type: 'make'
       },
       // 4. 相对路径格式（以 ./ 或 ../ 开头）
       {
-        pattern: /((?:\.{1,2}\/)[a-zA-Z0-9_/.-]+)(?::(\d+))?(?::(\d+))?/g,
+        pattern: /((?:\.{1,2}\/)[^:\s\(\)"']+)(?::(\d+))?(?::(\d+))?/g,
         type: 'relative'
       }
     ];
@@ -2535,12 +2535,14 @@ function findPotentialPaths(text) {
         const column = colStr ? parseInt(colStr, 10) : undefined;
 
         // 创建搜索信息对象
-        const searchInfo = fileName ? {
-          fileName,
-          pattern: `**/${fileName}`,
-          line,
-          column
-        } : null;
+        const searchInfo = fileName
+          ? {
+            fileName,
+            pattern: `**/${fileName}`,
+            line,
+            column
+          }
+          : null;
 
         // 处理路径
         if (processedPath.startsWith('/') || processedPath.startsWith('~/')) {
