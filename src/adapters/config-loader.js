@@ -6,8 +6,6 @@
 const vscode = require('vscode');
 const fs = require('fs').promises;
 const path = require('path');
-const homedir = require('os').homedir();
-const fsSync = require('fs');
 const { logger } = require('../utils/logger');
 
 // 全局配置缓存
@@ -17,145 +15,67 @@ let lastLoadTime = 0;
 const CACHE_TTL = 1000; // 1秒缓存有效期
 
 /**
- * 格式化服务器配置元素
- * @param {Object} element - 服务器配置元素
- * @returns {Object} - 格式化后的配置
- */
-function formatServerConfig(element) {
-  const config = {
-    name: element.name, // 用于命名
-    host: element.host, // 用于授权
-    port: element.port, // 用于授权（可以为undefined）
-    privateKey: element.privateKey, // 用于授权（可以为undefined）
-    agent: element.agent, // 用于授权（可以为undefined）
-    customCommands: element.customCommands, // 用于指定会话开始时执行的命令
-    pathMappings: [], // 初始化为空数组
-  };
-
-  // 保存已添加路径的映射，防止重复
-  const addedMappings = new Set();
-
-  // 处理新的pathMappings
-  if (element.pathMappings && Array.isArray(element.pathMappings)) {
-    element.pathMappings.forEach(mapping => {
-      if (mapping && (mapping.localPath || mapping.remotePath)) {
-        const mappingKey = `${mapping.localPath || ''}:${mapping.remotePath || ''}`;
-        if (!addedMappings.has(mappingKey)) {
-          config.pathMappings.push({
-            localPath: mapping.localPath,
-            remotePath: mapping.remotePath,
-          });
-          addedMappings.add(mappingKey);
-        }
-      }
-    });
-  }
-
-  // 合并旧的 smbMapping 到 pathMappings (向后兼容)
-  if (element.smbMapping && (element.smbMapping.localPath || element.smbMapping.remotePath)) {
-    const mappingKey = `${element.smbMapping.localPath || ''}:${element.smbMapping.remotePath || ''}`;
-    if (!addedMappings.has(mappingKey)) {
-      config.pathMappings.push({
-        localPath: element.smbMapping.localPath,
-        remotePath: element.smbMapping.remotePath,
-      });
-      addedMappings.add(mappingKey);
-    }
-  }
-
-  return config;
-}
-
-// 路径连接函数
-function pathjoin() {
-  return path.normalize(path.join.apply(this, arguments)).replace(/\\/g, '/');
-}
-
-// 获取用户设置位置
-function getUserSettingsLocation(filename) {
-  var folder = process.env.APPDATA || (process.platform == 'darwin' ? process.env.HOME + '/Library/Application Support' : process.platform == 'linux' ? pathjoin(homedir, '.config') : '/var/local');
-  if (/^[A-Z]:[/\\]/.test(folder)) folder = folder.substring(0, 1).toLowerCase() + folder.substring(1);
-  return pathjoin(folder, '/Code/User/', filename ? filename : '');
-}
-
-// 检查文件是否存在
-function fileExists(filename, local = false) {
-  var result = true;
-  if (fsSync.accessSync) {
-    try {
-      fsSync.accessSync(
-        (!local) ? getUserSettingsLocation(filename) : filename
-      );
-    } catch (e) {
-      result = false;
-    }
-  } else {
-    result = fsSync.existsSync(
-      (!local) ? getUserSettingsLocation(filename) : filename
-    );
-  }
-  return result;
-}
-
-/**
- * 加载smartssh-smba配置
- * @returns {Object} - 配置对象
- */
-function loadSmartSshConfig() {
-  try {
-    // 获取整合后的配置
-    const config = vscode.workspace.getConfiguration('smartssh-smba');
-    const integratedConfig = config.get('config') || {
-      showHostsInPickLists: false,
-      serverList: [],
-      customCommands: [],
-    };
-
-    // 从配置中获取服务器列表
-    const serverList = integratedConfig.serverList || [];
-
-    // 转换为所需格式
-    const configs = serverList.map(server => {
-      return {
-        name: server.name,
-        configuration: server,
-      };
-    });
-
-    return {
-      result: true,
-      configs: configs,
-    };
-  } catch (error) {
-    logger.error('加载 SmartSSH-SMBA 配置时出错:', error);
-    return {
-      result: false,
-      configs: [],
-    };
-  }
-}
-
-/**
  * 获取扩展配置
  * @returns {Object} - 配置对象
  */
 function getConfig() {
   try {
     // 如果缓存存在且有效，返回缓存
-    if (configCache) {
+    const now = Date.now();
+    if (configCache && (now - lastLoadTime < CACHE_TTL)) {
       return configCache;
     }
 
     // 获取扩展配置
     const config = vscode.workspace.getConfiguration('smartssh-smba');
-    
-    // 将配置复制到一个普通对象以确保可以修改
-    configCache = JSON.parse(JSON.stringify(config));
-    
-    return configCache;
+
+    // 获取全局配置
+    const globalConfig = config.inspect('config').globalValue || {
+      showHostsInPickLists: false,
+      serverList: [],
+      customCommands: [],
+    };
+
+    // 获取工作区配置
+    const workspaceConfig = config.inspect('config').workspaceValue || {
+      showHostsInPickLists: false,
+      serverList: [],
+      customCommands: [],
+    };
+
+    // 合并配置，模拟原始loadConfig功能
+    const integratedConfig = {
+      showHostsInPickLists: workspaceConfig.showHostsInPickLists || globalConfig.showHostsInPickLists || false,
+      serverList: [...(globalConfig.serverList || []), ...(workspaceConfig.serverList || [])],
+      // 确保全局命令不包含工作区标识
+      customCommands: (globalConfig.customCommands || []).map(cmd => ({
+        ...cmd,
+        isWorkspaceCommand: false,
+      })),
+      // 添加工作区标识到工作区命令
+      workspaceCommands: (workspaceConfig.customCommands || []).map(cmd => ({
+        ...cmd,
+        isWorkspaceCommand: true,
+        workspaceName: vscode.workspace.name || '当前工作区',
+      })),
+    };
+
+    // 更新缓存和时间戳
+    configCache = integratedConfig;
+    lastLoadTime = now;
+
+    logger.info(`配置加载完成，服务器数量: ${integratedConfig.serverList ? integratedConfig.serverList.length : 0}`);
+
+    return integratedConfig;
   } catch (error) {
     logger.error(`获取配置时出错: ${error.message}`);
-    return {};
+    // 返回默认配置
+    return {
+      showHostsInPickLists: false,
+      serverList: [],
+      customCommands: [],
+      workspaceCommands: [],
+    };
   }
 }
 
@@ -170,13 +90,17 @@ async function updateConfig(section, value, global = true) {
   try {
     // 获取扩展配置
     const config = vscode.workspace.getConfiguration('smartssh-smba');
-    
+
+    // 确定配置目标
+    const target = global ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.Workspace;
+
     // 更新配置
-    await config.update(section, value, global);
-    
+    await config.update(section, value, target);
+
     // 清除缓存
     configCache = null;
-    
+    lastLoadTime = 0;
+
     return true;
   } catch (error) {
     logger.error(`更新配置时出错: ${error.message}`);
@@ -186,14 +110,40 @@ async function updateConfig(section, value, global = true) {
 
 /**
  * 获取服务器列表
- * @returns {Array} - 服务器列表
+ * @returns {Array} 服务器列表
  */
 function getServerList() {
   try {
     const config = getConfig();
-    return config.servers || [];
+    // 直接从配置中获取服务器列表
+    const servers = config.serverList || [];
+
+    // 处理向后兼容性：将旧的smbMapping合并到pathMappings
+    servers.forEach(server => {
+      if (server.smbMapping && server.smbMapping.localPath && server.smbMapping.remotePath) {
+        if (!server.pathMappings) {
+          server.pathMappings = [];
+        }
+
+        // 检查是否已存在相同的映射
+        const existingMapping = server.pathMappings.find(
+          mapping => mapping.localPath === server.smbMapping.localPath &&
+            mapping.remotePath === server.smbMapping.remotePath
+        );
+
+        // 如果不存在相同映射，则添加
+        if (!existingMapping) {
+          server.pathMappings.push({
+            localPath: server.smbMapping.localPath,
+            remotePath: server.smbMapping.remotePath,
+          });
+        }
+      }
+    });
+
+    return servers;
   } catch (error) {
-    logger.error(`获取服务器列表时出错: ${error.message}`);
+    logger.error(`获取服务器列表失败: ${error.message}`);
     return [];
   }
 }
@@ -201,29 +151,40 @@ function getServerList() {
 /**
  * 添加服务器
  * @param {Object} server - 服务器配置
+ * @param {boolean} saveToWorkspace - 是否保存到工作区，默认为false（保存到全局）
  * @returns {Promise<boolean>} - 添加是否成功
  */
-async function addServer(server) {
+async function addServer(server, saveToWorkspace = false) {
   try {
     if (!server || !server.name || !server.host || !server.username) {
       logger.error('服务器配置无效');
       return false;
     }
-    
-    // 获取当前服务器列表
-    const servers = getServerList();
-    
+
+    // 获取当前配置
+    const config = vscode.workspace.getConfiguration('smartssh-smba');
+
+    // 确定目标配置（全局或工作区）
+    const configTarget = saveToWorkspace
+      ? config.inspect('config').workspaceValue || { serverList: [] }
+      : config.inspect('config').globalValue || { serverList: [] };
+
+    // 确保serverList存在
+    if (!configTarget.serverList) {
+      configTarget.serverList = [];
+    }
+
     // 检查是否已存在同名服务器
-    if (servers.some(s => s.name === server.name)) {
+    if (configTarget.serverList.some(s => s.name === server.name)) {
       logger.error(`服务器名称 ${server.name} 已存在`);
       return false;
     }
-    
+
     // 添加新服务器
-    servers.push(server);
-    
+    configTarget.serverList.push(server);
+
     // 更新配置
-    return await updateConfig('servers', servers);
+    return await updateConfig('config', configTarget, !saveToWorkspace);
   } catch (error) {
     logger.error(`添加服务器时出错: ${error.message}`);
     return false;
@@ -234,31 +195,51 @@ async function addServer(server) {
  * 更新服务器
  * @param {string} name - 服务器名称
  * @param {Object} updatedServer - 更新后的服务器配置
+ * @param {boolean} saveToWorkspace - 是否保存到工作区，默认为false（保存到全局）
  * @returns {Promise<boolean>} - 更新是否成功
  */
-async function updateServer(name, updatedServer) {
+async function updateServer(name, updatedServer, saveToWorkspace = false) {
   try {
     if (!name || !updatedServer) {
       logger.error('参数无效');
       return false;
     }
-    
-    // 获取当前服务器列表
-    const servers = getServerList();
-    
-    // 查找服务器索引
-    const index = servers.findIndex(s => s.name === name);
-    
-    if (index === -1) {
-      logger.error(`找不到服务器 ${name}`);
+
+    // 获取当前配置
+    const config = vscode.workspace.getConfiguration('smartssh-smba');
+
+    // 确定目标配置（全局或工作区）
+    const configTarget = saveToWorkspace
+      ? config.inspect('config').workspaceValue || { serverList: [] }
+      : config.inspect('config').globalValue || { serverList: [] };
+
+    // 确保serverList存在
+    if (!configTarget.serverList) {
+      configTarget.serverList = [];
+      logger.error('服务器列表不存在');
       return false;
     }
-    
+
+    // 查找服务器索引
+    const index = configTarget.serverList.findIndex(s => s.name === name);
+    if (index === -1) {
+      logger.error(`找不到名为 ${name} 的服务器`);
+      return false;
+    }
+
+    // 如果名称发生变化，需要检查新名称是否已存在
+    if (updatedServer.name !== name) {
+      if (configTarget.serverList.some(s => s.name === updatedServer.name)) {
+        logger.error(`服务器名称 ${updatedServer.name} 已存在`);
+        return false;
+      }
+    }
+
     // 更新服务器
-    servers[index] = { ...servers[index], ...updatedServer };
-    
+    configTarget.serverList[index] = updatedServer;
+
     // 更新配置
-    return await updateConfig('servers', servers);
+    return await updateConfig('config', configTarget, !saveToWorkspace);
   } catch (error) {
     logger.error(`更新服务器时出错: ${error.message}`);
     return false;
@@ -268,29 +249,43 @@ async function updateServer(name, updatedServer) {
 /**
  * 删除服务器
  * @param {string} name - 服务器名称
+ * @param {boolean} deleteFromWorkspace - 是否从工作区删除，默认为false（从全局删除）
  * @returns {Promise<boolean>} - 删除是否成功
  */
-async function deleteServer(name) {
+async function deleteServer(name, deleteFromWorkspace = false) {
   try {
     if (!name) {
-      logger.error('服务器名称无效');
+      logger.error('服务器名称不能为空');
       return false;
     }
-    
-    // 获取当前服务器列表
-    const servers = getServerList();
-    
-    // 过滤掉要删除的服务器
-    const filteredServers = servers.filter(s => s.name !== name);
-    
-    // 检查是否找到并删除了服务器
-    if (filteredServers.length === servers.length) {
-      logger.error(`找不到服务器 ${name}`);
+
+    // 获取当前配置
+    const config = vscode.workspace.getConfiguration('smartssh-smba');
+
+    // 确定目标配置（全局或工作区）
+    const configTarget = deleteFromWorkspace
+      ? config.inspect('config').workspaceValue || { serverList: [] }
+      : config.inspect('config').globalValue || { serverList: [] };
+
+    // 确保serverList存在
+    if (!configTarget.serverList) {
+      configTarget.serverList = [];
+      logger.error('服务器列表不存在');
       return false;
     }
-    
+
+    // 查找服务器索引
+    const index = configTarget.serverList.findIndex(s => s.name === name);
+    if (index === -1) {
+      logger.error(`找不到名为 ${name} 的服务器`);
+      return false;
+    }
+
+    // 删除服务器
+    configTarget.serverList.splice(index, 1);
+
     // 更新配置
-    return await updateConfig('servers', filteredServers);
+    return await updateConfig('config', configTarget, !deleteFromWorkspace);
   } catch (error) {
     logger.error(`删除服务器时出错: ${error.message}`);
     return false;
@@ -325,10 +320,10 @@ function getWorkspaceConfigPath() {
     if (!folders || folders.length === 0) {
       return null;
     }
-    
+
     // 使用第一个工作区文件夹
     const workspaceFolder = folders[0];
-    
+
     // 构建工作区配置文件路径
     return path.join(workspaceFolder.uri.fsPath, '.smartssh-smba.json');
   } catch (error) {
@@ -347,7 +342,7 @@ async function ensureWorkspaceConfigExists() {
     if (!configPath) {
       return false;
     }
-    
+
     try {
       // 检查文件是否存在
       await fs.access(configPath);
@@ -357,7 +352,7 @@ async function ensureWorkspaceConfigExists() {
       await fs.writeFile(configPath, JSON.stringify({
         customCommands: [],
       }, null, 2));
-      
+
       return true;
     }
   } catch (error) {
@@ -376,28 +371,28 @@ async function loadWorkspaceConfig() {
     if (workspaceConfigCache) {
       return workspaceConfigCache;
     }
-    
+
     // 获取配置文件路径
     const configPath = getWorkspaceConfigPath();
     if (!configPath) {
       return {};
     }
-    
+
     // 确保配置文件存在
     const exists = await ensureWorkspaceConfigExists();
     if (!exists) {
       return {};
     }
-    
+
     // 读取配置文件
     const configData = await fs.readFile(configPath, 'utf8');
-    
+
     // 解析JSON
     const config = JSON.parse(configData);
-    
+
     // 缓存配置
     workspaceConfigCache = config;
-    
+
     return config;
   } catch (error) {
     logger.error(`加载工作区配置时出错: ${error.message}`);
@@ -417,19 +412,19 @@ async function saveWorkspaceConfig(config) {
     if (!configPath) {
       return false;
     }
-    
+
     // 确保配置文件存在
     const exists = await ensureWorkspaceConfigExists();
     if (!exists) {
       return false;
     }
-    
+
     // 保存配置
     await fs.writeFile(configPath, JSON.stringify(config, null, 2));
-    
+
     // 更新缓存
     workspaceConfigCache = config;
-    
+
     return true;
   } catch (error) {
     logger.error(`保存工作区配置时出错: ${error.message}`);
@@ -438,13 +433,16 @@ async function saveWorkspaceConfig(config) {
 }
 
 /**
- * 获取工作区命令
- * @returns {Promise<Array>} - 工作区命令列表
+ * 获取工作区命令列表
+ * @returns {Array} - 工作区命令列表
  */
-async function getWorkspaceCommands() {
+function getWorkspaceCommands() {
   try {
-    const config = await loadWorkspaceConfig();
-    return config.customCommands || [];
+    // 获取配置
+    const config = getConfig();
+    
+    // 直接从配置中获取工作区命令
+    return config.workspaceCommands || [];
   } catch (error) {
     logger.error(`获取工作区命令时出错: ${error.message}`);
     return [];
@@ -462,20 +460,25 @@ async function addWorkspaceCommand(command) {
       logger.error('命令无效');
       return false;
     }
-    
-    // 加载工作区配置
-    const config = await loadWorkspaceConfig();
-    
+
+    // 获取当前配置
+    const config = vscode.workspace.getConfiguration('smartssh-smba');
+    const workspaceConfig = config.inspect('config').workspaceValue || {
+      showHostsInPickLists: false,
+      serverList: [],
+      customCommands: [],
+    };
+
     // 确保customCommands数组存在
-    if (!config.customCommands) {
-      config.customCommands = [];
+    if (!workspaceConfig.customCommands) {
+      workspaceConfig.customCommands = [];
     }
-    
+
     // 添加命令
-    config.customCommands.push(command);
-    
-    // 保存配置
-    return await saveWorkspaceConfig(config);
+    workspaceConfig.customCommands.push(command);
+
+    // 更新配置
+    return await updateConfig('config', workspaceConfig, false);
   } catch (error) {
     logger.error(`添加工作区命令时出错: ${error.message}`);
     return false;
@@ -494,31 +497,36 @@ async function updateWorkspaceCommand(oldCommand, newCommand) {
       logger.error('命令无效');
       return false;
     }
-    
-    // 加载工作区配置
-    const config = await loadWorkspaceConfig();
-    
+
+    // 获取当前配置
+    const config = vscode.workspace.getConfiguration('smartssh-smba');
+    const workspaceConfig = config.inspect('config').workspaceValue || {
+      showHostsInPickLists: false,
+      serverList: [],
+      customCommands: [],
+    };
+
     // 确保customCommands数组存在
-    if (!config.customCommands || !Array.isArray(config.customCommands)) {
+    if (!workspaceConfig.customCommands || !Array.isArray(workspaceConfig.customCommands)) {
       logger.error('工作区命令列表无效');
       return false;
     }
-    
+
     // 查找命令索引
-    const index = config.customCommands.findIndex(cmd => 
+    const index = workspaceConfig.customCommands.findIndex(cmd =>
       cmd.command === oldCommand.command && cmd.name === oldCommand.name
     );
-    
+
     if (index === -1) {
       logger.error('找不到要更新的命令');
       return false;
     }
-    
+
     // 更新命令
-    config.customCommands[index] = newCommand;
-    
-    // 保存配置
-    return await saveWorkspaceConfig(config);
+    workspaceConfig.customCommands[index] = newCommand;
+
+    // 更新配置
+    return await updateConfig('config', workspaceConfig, false);
   } catch (error) {
     logger.error(`更新工作区命令时出错: ${error.message}`);
     return false;
@@ -536,30 +544,35 @@ async function deleteWorkspaceCommand(command) {
       logger.error('命令无效');
       return false;
     }
-    
-    // 加载工作区配置
-    const config = await loadWorkspaceConfig();
-    
+
+    // 获取当前配置
+    const config = vscode.workspace.getConfiguration('smartssh-smba');
+    const workspaceConfig = config.inspect('config').workspaceValue || {
+      showHostsInPickLists: false,
+      serverList: [],
+      customCommands: [],
+    };
+
     // 确保customCommands数组存在
-    if (!config.customCommands || !Array.isArray(config.customCommands)) {
+    if (!workspaceConfig.customCommands || !Array.isArray(workspaceConfig.customCommands)) {
       logger.error('工作区命令列表无效');
       return false;
     }
-    
+
     // 过滤掉要删除的命令
-    const originalLength = config.customCommands.length;
-    config.customCommands = config.customCommands.filter(cmd => 
+    const originalLength = workspaceConfig.customCommands.length;
+    workspaceConfig.customCommands = workspaceConfig.customCommands.filter(cmd =>
       !(cmd.command === command.command && cmd.name === command.name)
     );
-    
+
     // 检查是否找到并删除了命令
-    if (config.customCommands.length === originalLength) {
+    if (workspaceConfig.customCommands.length === originalLength) {
       logger.error('找不到要删除的命令');
       return false;
     }
-    
-    // 保存配置
-    return await saveWorkspaceConfig(config);
+
+    // 更新配置
+    return await updateConfig('config', workspaceConfig, false);
   } catch (error) {
     logger.error(`删除工作区命令时出错: ${error.message}`);
     return false;
@@ -577,16 +590,23 @@ async function addGlobalCommand(command) {
       logger.error('命令无效');
       return false;
     }
-    
-    // 获取当前自定义命令列表
-    const config = getConfig();
-    const commands = config.customCommands || [];
-    
-    // 添加命令
-    commands.push(command);
-    
+
+    // 获取当前配置
+    const config = vscode.workspace.getConfiguration('smartssh-smba');
+    const globalConfig = config.inspect('config').globalValue || {
+      showHostsInPickLists: false,
+      serverList: [],
+      customCommands: [],
+    };
+
+    // 添加命令到全局配置
+    if (!globalConfig.customCommands) {
+      globalConfig.customCommands = [];
+    }
+    globalConfig.customCommands.push(command);
+
     // 更新配置
-    return await updateConfig('customCommands', commands);
+    return await updateConfig('config', globalConfig);
   } catch (error) {
     logger.error(`添加全局命令时出错: ${error.message}`);
     return false;
@@ -605,26 +625,37 @@ async function updateGlobalCommand(oldCommand, newCommand) {
       logger.error('命令无效');
       return false;
     }
-    
-    // 获取当前自定义命令列表
-    const config = getConfig();
-    const commands = config.customCommands || [];
-    
+
+    // 获取当前配置
+    const config = vscode.workspace.getConfiguration('smartssh-smba');
+    const globalConfig = config.inspect('config').globalValue || {
+      showHostsInPickLists: false,
+      serverList: [],
+      customCommands: [],
+    };
+
+    // 确保customCommands存在
+    if (!globalConfig.customCommands) {
+      globalConfig.customCommands = [];
+      logger.error('找不到要更新的命令');
+      return false;
+    }
+
     // 查找命令索引
-    const index = commands.findIndex(cmd => 
+    const index = globalConfig.customCommands.findIndex(cmd =>
       cmd.command === oldCommand.command && cmd.name === oldCommand.name
     );
-    
+
     if (index === -1) {
       logger.error('找不到要更新的命令');
       return false;
     }
-    
+
     // 更新命令
-    commands[index] = newCommand;
-    
+    globalConfig.customCommands[index] = newCommand;
+
     // 更新配置
-    return await updateConfig('customCommands', commands);
+    return await updateConfig('config', globalConfig);
   } catch (error) {
     logger.error(`更新全局命令时出错: ${error.message}`);
     return false;
@@ -642,25 +673,35 @@ async function deleteGlobalCommand(command) {
       logger.error('命令无效');
       return false;
     }
-    
-    // 获取当前自定义命令列表
-    const config = getConfig();
-    const commands = config.customCommands || [];
-    
+
+    // 获取当前配置
+    const config = vscode.workspace.getConfiguration('smartssh-smba');
+    const globalConfig = config.inspect('config').globalValue || {
+      showHostsInPickLists: false,
+      serverList: [],
+      customCommands: [],
+    };
+
+    // 确保customCommands存在
+    if (!globalConfig.customCommands || !Array.isArray(globalConfig.customCommands)) {
+      logger.error('命令列表无效');
+      return false;
+    }
+
     // 过滤掉要删除的命令
-    const originalLength = commands.length;
-    const filteredCommands = commands.filter(cmd => 
+    const originalLength = globalConfig.customCommands.length;
+    globalConfig.customCommands = globalConfig.customCommands.filter(cmd =>
       !(cmd.command === command.command && cmd.name === command.name)
     );
-    
+
     // 检查是否找到并删除了命令
-    if (filteredCommands.length === originalLength) {
+    if (globalConfig.customCommands.length === originalLength) {
       logger.error('找不到要删除的命令');
       return false;
     }
-    
+
     // 更新配置
-    return await updateConfig('customCommands', filteredCommands);
+    return await updateConfig('config', globalConfig);
   } catch (error) {
     logger.error(`删除全局命令时出错: ${error.message}`);
     return false;
@@ -684,6 +725,44 @@ vscode.workspace.onDidChangeConfiguration(event => {
   }
 });
 
+/**
+ * 更新工作区命令列表
+ * @param {Array} commands - 命令列表
+ * @returns {Promise<boolean>} - 更新是否成功
+ */
+async function updateWorkspaceCommands(commands) {
+  try {
+    logger.info('更新工作区命令');
+    
+    // 获取当前工作区配置
+    const config = vscode.workspace.getConfiguration('smartssh-smba');
+    const workspaceConfig = config.inspect('config').workspaceValue || {
+      showHostsInPickLists: false,
+      serverList: [],
+      customCommands: [],
+    };
+
+    // 更新工作区命令
+    workspaceConfig.customCommands = commands.map(cmd => {
+      // 移除工作区特定属性，但保留contextValue
+      const { workspaceName, ...cleanCmd } = cmd;
+      return cleanCmd;
+    });
+
+    // 保存到工作区配置
+    await config.update('config', workspaceConfig, vscode.ConfigurationTarget.Workspace);
+    
+    // 清除缓存
+    refreshCache();
+    
+    logger.info('工作区命令已更新');
+    return true;
+  } catch (error) {
+    logger.error(`更新工作区命令时出错: ${error.message}`);
+    return false;
+  }
+}
+
 module.exports = {
   getConfig,
   updateConfig,
@@ -703,4 +782,5 @@ module.exports = {
   updateGlobalCommand,
   deleteGlobalCommand,
   refreshCache,
-}; 
+  updateWorkspaceCommands,
+};

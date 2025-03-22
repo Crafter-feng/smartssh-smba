@@ -9,6 +9,65 @@ const { logger } = require('../../utils/logger');
 const BaseTreeItem = require('./base-tree-item');
 
 /**
+ * 获取适当的图标
+ * @param {string|Object} item - 项目键名或命令
+ * @returns {vscode.ThemeIcon} - 主题图标
+ */
+function getIconForItem(item) {
+  // 统一的图标映射，使用模式匹配
+  const iconPatterns = [
+    { pattern: ['host', 'hostname', 'server'], icon: 'globe' },
+    { pattern: ['username', 'user', 'account'], icon: 'person' },
+    { pattern: ['port', 'socket'], icon: 'plug' },
+    { pattern: ['password', 'pwd', 'secret'], icon: 'lock' },
+    { pattern: ['privateKey', 'key', 'certificate'], icon: 'key' },
+    { pattern: ['agent', 'proxy'], icon: 'shield' },
+    { pattern: ['path'], icon: 'folder' },
+    { pattern: ['localPath', 'local'], icon: 'folder-opened' },
+    { pattern: ['remotePath', 'remote'], icon: 'remote' },
+    { pattern: ['ls', 'dir', 'list'], icon: 'list-tree' },
+    { pattern: ['cd', 'chdir'], icon: 'folder' },
+    { pattern: ['git'], icon: 'git-branch' },
+    { pattern: ['npm', 'yarn', 'pnpm'], icon: 'package' },
+    { pattern: ['docker', 'container'], icon: 'server-environment' },
+    { pattern: ['ssh', 'telnet'], icon: 'remote-explorer' },
+    { pattern: ['cat', 'less', 'more', 'type'], icon: 'file-text' },
+    { pattern: ['rm', 'del', 'delete', 'remove'], icon: 'trash' },
+    { pattern: ['cp', 'copy'], icon: 'files' },
+    { pattern: ['mv', 'move', 'rename'], icon: 'arrow-right' },
+    { pattern: ['mkdir', 'md'], icon: 'new-folder' },
+    { pattern: ['touch', 'new-item', 'ni'], icon: 'new-file' },
+    { pattern: ['chmod', 'chown', 'permission'], icon: 'shield' },
+    { pattern: ['ps', 'top', 'process'], icon: 'pulse' },
+    { pattern: ['grep', 'find', 'search'], icon: 'search' },
+  ];
+
+  // 获取要匹配的文本
+  let textToMatch = '';
+  if (typeof item === 'string') {
+    textToMatch = item;
+  } else if (item && item.command) {
+    textToMatch = item.command;
+  } else {
+    // 如果没有有效的文本，返回默认图标
+    return new vscode.ThemeIcon('terminal');
+  }
+
+  // 转为小写以便不区分大小写匹配
+  const lowerText = textToMatch.toLowerCase();
+
+  // 查找匹配的图标
+  for (const pattern of iconPatterns) {
+    if (pattern.pattern.some(p => lowerText.includes(p.toLowerCase()))) {
+      return new vscode.ThemeIcon(pattern.icon);
+    }
+  }
+
+  // 默认图标
+  return new vscode.ThemeIcon('terminal');
+}
+
+/**
  * 服务器树项
  */
 class ServerTreeItem extends BaseTreeItem {
@@ -38,6 +97,7 @@ class ServerTreeItem extends BaseTreeItem {
       case 'global-command':
       case 'serverCommand':
       case 'init-command':
+      case 'custom-command':
       case 'server-command':
         this.setupCommandProperties(commandObj, contextValue, false);
         break;
@@ -54,6 +114,19 @@ class ServerTreeItem extends BaseTreeItem {
       case 'smb-group':
         this.iconPath = new vscode.ThemeIcon('folder-opened');
         break;
+      case 'smb-mapping':
+        this.iconPath = new vscode.ThemeIcon('link');
+        this.tooltip = `路径映射\n本地路径: ${commandObj.localPath || '未指定'}\n远程路径: ${commandObj.remotePath || '未指定'}`;
+        this.description = commandObj.description;
+        break;
+      case 'local-path':
+        this.iconPath = new vscode.ThemeIcon('folder-opened');
+        this.tooltip = `映射的本地路径: ${commandObj.path}`;
+        break;
+      case 'remote-path':
+        this.iconPath = new vscode.ThemeIcon('remote');
+        this.tooltip = `映射的远程路径: ${commandObj.path}`;
+        break;
     }
   }
 
@@ -63,7 +136,7 @@ class ServerTreeItem extends BaseTreeItem {
   setupServerItem() {
     // 设置图标
     this.iconPath = new vscode.ThemeIcon('server');
-    
+
     // 设置工具提示
     if (this.server) {
       this.tooltip = `${this.server.name} (${this.server.username}@${this.server.host})`;
@@ -73,18 +146,14 @@ class ServerTreeItem extends BaseTreeItem {
     } else {
       this.tooltip = this.label;
     }
-    
+
     // 设置描述
     if (this.server) {
       this.description = `${this.server.username}@${this.server.host}`;
     }
-    
-    // 设置点击命令
-    this.command = {
-      command: 'smartssh-smba.connectToServer',
-      title: '连接到服务器',
-      arguments: [this.server.name]
-    };
+
+    // 不设置点击命令，使用默认的展开/折叠行为
+    this.command = null;
   }
 
   /**
@@ -105,9 +174,49 @@ class ServerTreeItem extends BaseTreeItem {
     } else {
       this.iconPath = new vscode.ThemeIcon('settings');
     }
-    
+
     // 设置描述
     this.description = this.server ? this.server[this.configKey] : '';
+  }
+
+  /**
+   * 设置命令相关属性
+   * @param {Object} commandObj - 命令对象
+   * @param {string} contextValue - 上下文值
+   * @param {boolean} enableClickAction - 是否启用点击动作
+   */
+  setupCommandProperties(commandObj, contextValue, enableClickAction = false) {
+    // 设置图标
+    if (commandObj && commandObj.icon) {
+      this.iconPath = new vscode.ThemeIcon(commandObj.icon);
+    } else {
+      this.iconPath = getIconForItem(commandObj ? commandObj.command : this.label);
+    }
+
+    // 设置工具提示
+    if (commandObj) {
+      this.tooltip = `执行命令: ${commandObj.command}`;
+      if (commandObj.description) {
+        this.tooltip += `\n${commandObj.description}`;
+      }
+    } else {
+      this.tooltip = `执行命令: ${this.label}`;
+    }
+
+    // 禁用点击执行命令，而是使用按钮
+    this.command = null;
+    // 添加发送命令的按钮
+    this.buttons = [
+      {
+        iconPath: new vscode.ThemeIcon('terminal-view-icon'),
+        tooltip: '发送命令',
+        command: {
+          command: 'smartssh-smba.sendCommand',
+          title: '发送命令',
+          arguments: [this],
+        },
+      },
+    ];
   }
 }
 
@@ -117,10 +226,12 @@ class ServerTreeItem extends BaseTreeItem {
 class ServerTreeProvider {
   /**
    * 创建服务器树视图提供者
+   * @param {vscode.ExtensionContext} context - 扩展上下文
    */
-  constructor() {
+  constructor(context) {
     this._onDidChangeTreeData = new vscode.EventEmitter();
     this.onDidChangeTreeData = this._onDidChangeTreeData.event;
+    this.context = context;
   }
 
   /**
@@ -149,11 +260,17 @@ class ServerTreeProvider {
       } else if (element.contextValue === 'init-commands-group') {
         // 返回初始化命令组的子节点
         return this.getInitCommandNodes(element.server);
+      } else if (element.contextValue === 'custom-commands-group') {
+        // 返回自定义命令组的子节点
+        return this.getCustomCommandNodes(element.server);
       } else if (element.contextValue === 'smb-group') {
         // 返回SMB映射组的子节点
         return this.getPathMappingNodes(element.server);
+      } else if (element.contextValue === 'smb-mapping' && element.commandObj) {
+        // 返回路径映射的详细信息
+        return this.getMappingDetails(element.server, element.commandObj);
       }
-      
+
       return [];
     } catch (error) {
       logger.error(`获取树节点时出错: ${error.message}`);
@@ -169,7 +286,7 @@ class ServerTreeProvider {
     try {
       // 获取服务器列表
       const servers = configLoader.getServerList() || [];
-      
+
       if (servers.length === 0) {
         // 如果没有服务器，返回提示
         return [
@@ -178,15 +295,15 @@ class ServerTreeProvider {
             vscode.TreeItemCollapsibleState.None,
             null,
             'no-server'
-          )
+          ),
         ];
       }
-      
+
       // 为每个服务器创建树项
-      return servers.map(server => 
+      return servers.map(server =>
         new ServerTreeItem(
           server.name,
-          vscode.TreeItemCollapsibleState.Collapsed,
+          vscode.TreeItemCollapsibleState.Expanded,
           server,
           'server'
         )
@@ -206,47 +323,57 @@ class ServerTreeProvider {
     if (!server) {
       return [];
     }
-    
+
     const children = [];
-    
+
     // 添加配置组
     children.push(
       new ServerTreeItem(
         '配置',
-        vscode.TreeItemCollapsibleState.Collapsed,
+        vscode.TreeItemCollapsibleState.Expanded,
         server,
         'config-group'
       )
     );
-    
+
     // 添加初始化命令组（如果有）
     if (server.initCommands && server.initCommands.length > 0) {
       children.push(
         new ServerTreeItem(
           '初始化命令',
-          vscode.TreeItemCollapsibleState.Collapsed,
+          vscode.TreeItemCollapsibleState.Expanded,
           server,
           'init-commands-group'
         )
       );
     }
-    
+
+    // 添加自定义命令组（如果有）
+    if (server.customCommands && server.customCommands.length > 0) {
+      children.push(
+        new ServerTreeItem(
+          '自定义命令',
+          vscode.TreeItemCollapsibleState.Expanded,
+          server,
+          'custom-commands-group'
+        )
+      );
+    }
+
     // 添加路径映射组（如果有）
-    const hasPathMappings = 
-      (server.pathMappings && server.pathMappings.length > 0) ||
-      (server.smbMapping && server.smbMapping.localPath);
-    
+    const hasPathMappings = server.pathMappings && server.pathMappings.length > 0;
+
     if (hasPathMappings) {
       children.push(
         new ServerTreeItem(
           '路径映射',
-          vscode.TreeItemCollapsibleState.Collapsed,
+          vscode.TreeItemCollapsibleState.Expanded,
           server,
           'smb-group'
         )
       );
     }
-    
+
     return children;
   }
 
@@ -259,10 +386,10 @@ class ServerTreeProvider {
     if (!server) {
       return [];
     }
-    
+
     const configKeys = ['host', 'username', 'port', 'privateKey', 'agent'];
     const nodes = [];
-    
+
     for (const key of configKeys) {
       if (server[key] !== undefined) {
         nodes.push(
@@ -276,7 +403,7 @@ class ServerTreeProvider {
         );
       }
     }
-    
+
     return nodes;
   }
 
@@ -289,8 +416,8 @@ class ServerTreeProvider {
     if (!server || !server.initCommands || !Array.isArray(server.initCommands)) {
       return [];
     }
-    
-    return server.initCommands.map((cmd, index) => 
+
+    return server.initCommands.map((cmd, index) =>
       new ServerTreeItem(
         cmd,
         vscode.TreeItemCollapsibleState.None,
@@ -298,6 +425,28 @@ class ServerTreeProvider {
         'init-command',
         null,
         { command: cmd, index, description: `初始化命令 #${index + 1}` }
+      )
+    );
+  }
+
+  /**
+   * 获取自定义命令节点
+   * @param {Object} server - 服务器配置
+   * @returns {ServerTreeItem[]} - 树项数组
+   */
+  getCustomCommandNodes(server) {
+    if (!server || !server.customCommands || !Array.isArray(server.customCommands)) {
+      return [];
+    }
+
+    return server.customCommands.map((cmd, index) =>
+      new ServerTreeItem(
+        cmd.name || cmd.command,
+        vscode.TreeItemCollapsibleState.None,
+        server,
+        'custom-command',
+        null,
+        cmd
       )
     );
   }
@@ -311,48 +460,81 @@ class ServerTreeProvider {
     if (!server) {
       return [];
     }
-    
+
     const nodes = [];
-    
-    // 处理新的pathMappings
+
+    // 处理pathMappings
     if (server.pathMappings && Array.isArray(server.pathMappings)) {
       server.pathMappings.forEach((mapping, index) => {
         nodes.push(
           new ServerTreeItem(
-            `映射 #${index + 1}`,
-            vscode.TreeItemCollapsibleState.None,
+            `本地 ${mapping.localPath || '未指定'}`,
+            vscode.TreeItemCollapsibleState.Collapsed,
             server,
-            'path-mapping',
+            'smb-mapping',
             null,
             {
               localPath: mapping.localPath,
               remotePath: mapping.remotePath,
-              description: `${mapping.localPath} → ${mapping.remotePath}`
+              description: `映射到 ${mapping.remotePath || '未指定'}`,
+              index: index,
             }
           )
         );
       });
     }
-    
-    // 处理旧的单个smbMapping (向后兼容)
-    if (server.smbMapping && server.smbMapping.localPath && server.smbMapping.remotePath) {
-      nodes.push(
+
+    return nodes;
+  }
+
+  /**
+   * 获取路径映射详细信息
+   * @param {Object} server - 服务器配置
+   * @param {Object} mapping - 映射对象
+   * @returns {ServerTreeItem[]} - 树项数组
+   */
+  getMappingDetails(server, mapping) {
+    if (!mapping) {
+      return [];
+    }
+
+    const items = [];
+
+    // 添加本地路径项
+    if (mapping.localPath) {
+      items.push(
         new ServerTreeItem(
-          '映射 (旧版)',
+          `本地路径: ${mapping.localPath}`,
           vscode.TreeItemCollapsibleState.None,
           server,
-          'path-mapping',
+          'local-path',
           null,
           {
-            localPath: server.smbMapping.localPath,
-            remotePath: server.smbMapping.remotePath,
-            description: `${server.smbMapping.localPath} → ${server.smbMapping.remotePath} (请迁移到pathMappings)`
+            path: mapping.localPath,
+            description: `本地路径`,
           }
         )
       );
     }
-    
-    return nodes;
+
+    // 添加远程路径项
+    if (mapping.remotePath) {
+      items.push(
+        new ServerTreeItem(
+          `远程路径: ${mapping.remotePath}`,
+          vscode.TreeItemCollapsibleState.None,
+          server,
+          'remote-path',
+          null,
+          {
+            path: mapping.remotePath,
+            description: `远程路径`,
+          }
+        )
+      );
+    }
+
+    return items;
   }
 
   /**
@@ -365,7 +547,9 @@ class ServerTreeProvider {
   }
 }
 
+// 导出
 module.exports = {
   ServerTreeProvider,
-  ServerTreeItem
-}; 
+  ServerTreeItem,
+  getIconForItem,
+};

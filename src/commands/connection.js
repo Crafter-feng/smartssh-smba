@@ -11,14 +11,17 @@ const { logger } = require('../utils/logger');
  * 打开SSH连接
  * @param {string} serverName - 服务器名称
  * @param {boolean} force - 是否强制创建新终端
+ * @returns {Promise<Object>} - 连接结果
  */
 async function openSSHConnection(serverName, force = false) {
   try {
     // 连接到服务器
-    await sshService.connectToServer(serverName, force);
+    const result = await sshService.connectToServer(serverName, force);
+    return result;
   } catch (error) {
     logger.error(`打开SSH连接时出错: ${error.message}`);
     vscode.window.showErrorMessage(`打开SSH连接时出错: ${error.message}`);
+    throw error;
   }
 }
 
@@ -30,7 +33,7 @@ async function fastOpenConnection() {
     // 获取当前活跃的编辑器
     const editor = vscode.window.activeTextEditor;
     let serverName = null;
-    
+
     if (editor) {
       // 获取当前文件的路径
       const filePath = editor.document.uri.fsPath;
@@ -42,7 +45,7 @@ async function fastOpenConnection() {
         }
       }
     }
-    
+
     if (serverName) {
       // 如果找到对应的服务器，直接连接
       await openSSHConnection(serverName);
@@ -67,24 +70,24 @@ async function selectServer() {
   try {
     // 获取服务器列表
     const serverList = sshService.getServerList();
-    
+
     if (!serverList || serverList.length === 0) {
       vscode.window.showInformationMessage('没有配置服务器，请先添加服务器');
       return null;
     }
-    
+
     // 创建选择项
     const items = serverList.map(server => ({
       label: server.name,
       description: `${server.username}@${server.host}`,
-      server
+      server,
     }));
-    
+
     // 显示快速选择
     const selection = await vscode.window.showQuickPick(items, {
-      placeHolder: '选择一个服务器'
+      placeHolder: '选择一个服务器',
     });
-    
+
     return selection ? selection.label : null;
   } catch (error) {
     logger.error(`选择服务器时出错: ${error.message}`);
@@ -106,7 +109,7 @@ function register(context) {
       }
     })
   );
-  
+
   // 注册快速打开连接命令
   context.subscriptions.push(
     vscode.commands.registerCommand('smartssh-smba.fastOpenConnection', fastOpenConnection)
@@ -117,5 +120,5 @@ module.exports = {
   openSSHConnection,
   fastOpenConnection,
   selectServer,
-  register
-}; 
+  register,
+};

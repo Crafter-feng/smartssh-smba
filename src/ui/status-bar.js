@@ -11,7 +11,7 @@ let fastOpenConnectionButton = null;
 
 /**
  * 初始化状态栏
- * @param {vscode.ExtensionContext} context - 扩展上下文 
+ * @param {vscode.ExtensionContext} context - 扩展上下文
  */
 function initialize(context) {
   try {
@@ -21,13 +21,13 @@ function initialize(context) {
     fastOpenConnectionButton.text = '$(terminal) 连接 SSH';
     fastOpenConnectionButton.tooltip = '打开 SSH 连接';
     fastOpenConnectionButton.show();
-    
+
     // 将状态栏按钮添加到上下文处置列表
     context.subscriptions.push(fastOpenConnectionButton);
-    
+
     // 记录日志
     logger.debug('状态栏已初始化');
-    
+
     // 更新状态栏按钮
     updateStatusBarButton();
   } catch (error) {
@@ -44,14 +44,14 @@ function updateStatusBarButton() {
     if (!fastOpenConnectionButton) {
       return;
     }
-    
+
     // 获取当前活动的编辑器
     const editor = vscode.window.activeTextEditor;
-    
+
     if (editor) {
       // 根据编辑器状态调整按钮文本
       const filePath = editor.document.uri.fsPath;
-      
+
       if (filePath) {
         // 检查文件路径是否为本地路径
         if (filePath.startsWith('file:')) {
@@ -72,7 +72,7 @@ function updateStatusBarButton() {
       fastOpenConnectionButton.text = '$(terminal) 连接 SSH';
       fastOpenConnectionButton.tooltip = '打开 SSH 连接';
     }
-    
+
     // 显示按钮
     fastOpenConnectionButton.show();
   } catch (error) {
@@ -88,5 +88,5 @@ function updateStatusBarButton() {
 
 module.exports = {
   initialize,
-  updateStatusBarButton
-}; 
+  updateStatusBarButton,
+};

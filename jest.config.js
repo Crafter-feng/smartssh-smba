@@ -1,5 +1,5 @@
-/**
- * Jest配置文件
+﻿/**
+ * Jest閰嶇疆鏂囦欢
  */
 module.exports = {
   testEnvironment: 'node',
@@ -8,7 +8,7 @@ module.exports = {
   collectCoverage: true,
   collectCoverageFrom: [
     'src/**/*.js',
-    '!src/extension.js', // 入口文件需要vscode API，不适合单元测试
+    '!src/extension.js', // 鍏ュ彛鏂囦欢闇€瑕乿scode API锛屼笉閫傚悎鍗曞厓娴嬭瘯
   ],
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov'],
@@ -20,11 +20,12 @@ module.exports = {
       statements: 70,
     },
   },
-  // 设置测试模块解析别名，以避免相对路径过长
+  // 璁剧疆娴嬭瘯妯″潡瑙ｆ瀽鍒悕锛屼互閬垮厤鐩稿璺緞杩囬暱
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
     '^@test/(.*)$': '<rootDir>/test/$1',
+    '^vscode$': '<rootDir>/test/mocks/vscode.js',
   },
-  // 在每个测试文件之前设置全局变量和模拟
+  // 鍦ㄦ瘡涓祴璇曟枃浠朵箣鍓嶈缃叏灞€鍙橀噺鍜屾ā鎷?
   setupFilesAfterEnv: ['<rootDir>/test/setup.js'],
-}; 
+};

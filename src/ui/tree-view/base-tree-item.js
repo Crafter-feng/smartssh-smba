@@ -36,7 +36,7 @@ function getIconForItem(item) {
     { pattern: ['touch', 'new-item', 'ni'], icon: 'new-file' },
     { pattern: ['chmod', 'chown', 'permission'], icon: 'shield' },
     { pattern: ['ps', 'top', 'process'], icon: 'pulse' },
-    { pattern: ['grep', 'find', 'search'], icon: 'search' }
+    { pattern: ['grep', 'find', 'search'], icon: 'search' },
   ];
 
   // 获取要匹配的文本
@@ -92,17 +92,8 @@ class BaseTreeItem extends vscode.TreeItem {
       this.tooltip = `执行命令: ${this.label}`;
     }
 
-    // 设置点击命令
-    if (enableClickAction) {
-      this.command = {
-        command: 'smartssh-smba.sendCommand',
-        title: '发送命令',
-        arguments: [this]
-      };
-    } else {
-      this.command = null;
-    }
+    this.command = null;
   }
 }
 
-module.exports = BaseTreeItem; 
+module.exports = BaseTreeItem;

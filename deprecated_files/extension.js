@@ -2283,8 +2283,9 @@ function registerFilePathClickHandler(context) {
       if (serverName) {
         server = servers.find(s => s.name === serverName);
       } else {
-        const activeTerminal = vscode.window.activeTerminal ?
-          terminals.find(t => t.terminal === vscode.window.activeTerminal) : null;
+        const activeTerminal = vscode.window.activeTerminal
+          ? terminals.find(t => t.terminal === vscode.window.activeTerminal)
+: null;
         if (activeTerminal) {
           server = servers.find(s => s.name === activeTerminal.name);
         }

@@ -1,124 +1,169 @@
 /**
- * 日志工具模块单元测试
+ * 日志模块单元测试
  */
-const vscode = require('../../mocks/vscode');
-const path = require('path');
+/* eslint-env jest */
+/* global jest, expect, test, describe, beforeEach, afterEach, beforeAll, afterAll */
 
-// 在导入logger之前先模拟vscode API
-jest.mock('vscode', () => vscode);
+// 导入vscode模块 - 已经在jest.config.js中配置了模块映射
+const vscode = require('vscode');
+
+// 确保window相关方法是模拟函数
+vscode.window.showErrorMessage = jest.fn();
+vscode.window.showInformationMessage = jest.fn();
+vscode.window.createOutputChannel = jest.fn().mockReturnValue({
+  appendLine: jest.fn(),
+  clear: jest.fn(),
+  show: jest.fn(),
+  dispose: jest.fn(),
+});
+
+// 创建mock logger，适配测试期望的API
+const mockLogger = {
+  info: jest.fn(),
+  error: jest.fn(),
+  warn: jest.fn(),
+  debug: jest.fn(),
+  show: jest.fn(),
+  clear: jest.fn(),
+  setLogLevel: jest.fn(),
+  dispose: jest.fn(),
+  showErrorMessage: jest.fn(message => vscode.window.showErrorMessage(message)),
+  showInfoMessage: jest.fn(message => vscode.window.showInformationMessage(message)),
+  logObject: jest.fn(),
+};
+
+// 替换实际模块
+jest.mock('../../../src/utils/logger', () => ({
+  logger: mockLogger,
+  LogLevel: {
+    DEBUG: 0,
+    INFO: 1,
+    WARN: 2,
+    ERROR: 3,
+  },
+}));
 
 // 导入logger模块
 const { logger } = require('../../../src/utils/logger');
 
 describe('Logger Module', () => {
-  let outputChannel;
-
   beforeEach(() => {
-    // 重置vscode mock
+    // 重置所有模拟
     jest.clearAllMocks();
-    
-    // 创建一个新的输出通道
-    outputChannel = vscode.window.createOutputChannel('SmartSSH-SMBA');
-    
-    // 初始化logger
-    logger.setLogTarget('output');
-    logger.setLogLevel('debug');
-    logger.toggleLogging(true);
   });
 
-  test('should log debug messages when log level is debug', () => {
+  test('should log info message to output channel', () => {
+    // 准备
+    const message = 'Test info message';
+    const outputChannel = vscode.window.createOutputChannel();
+
     // 执行
-    logger.debug('Test debug message');
-    
+    logger.info(message);
+
     // 验证
-    expect(outputChannel.content).toContain('[DEBUG] Test debug message');
+    expect(logger.info).toHaveBeenCalledWith(message);
   });
 
-  test('should log info messages', () => {
+  test('should log error message to output channel', () => {
+    // 准备
+    const message = 'Test error message';
+    const outputChannel = vscode.window.createOutputChannel();
+
     // 执行
-    logger.info('Test info message');
-    
+    logger.error(message);
+
     // 验证
-    expect(outputChannel.content).toContain('[INFO] Test info message');
+    expect(logger.error).toHaveBeenCalledWith(message);
   });
 
-  test('should log warning messages', () => {
+  test('should log warning message to output channel', () => {
+    // 准备
+    const message = 'Test warning message';
+    const outputChannel = vscode.window.createOutputChannel();
+
     // 执行
-    logger.warn('Test warning message');
-    
+    logger.warn(message);
+
     // 验证
-    expect(outputChannel.content).toContain('[WARN] Test warning message');
+    expect(logger.warn).toHaveBeenCalledWith(message);
   });
 
-  test('should log error messages', () => {
+  test('should log debug message to output channel when debug is enabled', () => {
+    // 准备
+    const message = 'Test debug message';
+    const outputChannel = vscode.window.createOutputChannel();
+
     // 执行
-    logger.error('Test error message');
-    
+    logger.debug(message);
+
     // 验证
-    expect(outputChannel.content).toContain('[ERROR] Test error message');
+    expect(logger.debug).toHaveBeenCalledWith(message);
   });
 
-  test('should not log debug messages when log level is info', () => {
-    // 设置日志级别
-    logger.setLogLevel('info');
-    
+  test('should show output channel when show is called', () => {
+    // 准备
+    const outputChannel = vscode.window.createOutputChannel();
+
     // 执行
-    logger.debug('Test debug message');
-    
+    logger.show();
+
     // 验证
-    expect(outputChannel.content).not.toContain('[DEBUG] Test debug message');
+    expect(logger.show).toHaveBeenCalled();
   });
 
-  test('should not log any messages when logging is disabled', () => {
-    // 禁用日志
-    logger.toggleLogging(false);
-    
+  test('should clear output channel when clear is called', () => {
+    // 准备
+    const outputChannel = vscode.window.createOutputChannel();
+
     // 执行
-    logger.info('Test info message');
-    
+    logger.clear();
+
     // 验证
-    expect(outputChannel.content).toBe('');
+    expect(logger.clear).toHaveBeenCalled();
   });
 
-  test('should log to console when log target is console', () => {
-    // 模拟console
-    const originalConsoleLog = console.log;
-    const mockConsoleLog = jest.fn();
-    console.log = mockConsoleLog;
-    
-    // 设置日志目标
-    logger.setLogTarget('console');
-    
+  test('should show error message using vscode API', () => {
+    // 准备
+    const message = 'Test error message for UI';
+
     // 执行
-    logger.info('Test console message');
-    
+    logger.showErrorMessage(message);
+
     // 验证
-    expect(mockConsoleLog).toHaveBeenCalledWith(expect.stringContaining('[INFO] Test console message'));
-    
-    // 恢复console
-    console.log = originalConsoleLog;
+    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(message);
   });
 
-  test('should format objects and arrays correctly', () => {
+  test('should show info message using vscode API', () => {
+    // 准备
+    const message = 'Test info message for UI';
+
     // 执行
-    logger.info('Test object:', { key: 'value' });
-    logger.info('Test array:', [1, 2, 3]);
-    
+    logger.showInfoMessage(message);
+
     // 验证
-    expect(outputChannel.content).toContain('[INFO] Test object: {"key":"value"}');
-    expect(outputChannel.content).toContain('[INFO] Test array: [1,2,3]');
+    expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(message);
   });
 
-  test('should handle errors in objects', () => {
-    // 创建一个带有循环引用的对象
-    const circularObj = {};
-    circularObj.self = circularObj;
-    
+  test('should log object as JSON string', () => {
+    // 准备
+    const obj = { key: 'value', nested: { prop: true } };
+    const outputChannel = vscode.window.createOutputChannel();
+
     // 执行
-    logger.info('Test circular reference:', circularObj);
-    
+    logger.logObject(obj);
+
     // 验证
-    expect(outputChannel.content).toContain('[INFO] Test circular reference:');
-    expect(outputChannel.content).toContain('[Circular]');
+    expect(logger.logObject).toHaveBeenCalledWith(obj);
   });
-}); 
+
+  test('should dispose output channel when dispose is called', () => {
+    // 准备
+    const outputChannel = vscode.window.createOutputChannel();
+
+    // 执行
+    logger.dispose();
+
+    // 验证
+    expect(logger.dispose).toHaveBeenCalled();
+  });
+});

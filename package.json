@@ -168,7 +168,11 @@
               "description": "SSH服务器列表",
               "items": {
                 "type": "object",
-                "required": ["name", "host", "username"],
+                "required": [
+                  "name",
+                  "host",
+                  "username"
+                ],
                 "properties": {
                   "name": {
                     "type": "string",
@@ -213,7 +217,10 @@
                     "description": "路径映射配置列表",
                     "items": {
                       "type": "object",
-                      "required": ["localPath", "remotePath"],
+                      "required": [
+                        "localPath",
+                        "remotePath"
+                      ],
                       "properties": {
                         "localPath": {
                           "type": "string",
@@ -247,7 +254,10 @@
                     "default": [],
                     "items": {
                       "type": "object",
-                      "required": ["name", "command"],
+                      "required": [
+                        "name",
+                        "command"
+                      ],
                       "properties": {
                         "name": {
                           "type": "string",
@@ -277,7 +287,10 @@
               "default": [],
               "items": {
                 "type": "object",
-                "required": ["name", "command"],
+                "required": [
+                  "name",
+                  "command"
+                ],
                 "properties": {
                   "name": {
                     "type": "string",
@@ -375,7 +388,7 @@
         },
         {
           "command": "smartssh-smba.sendCommand",
-          "when": "view == smartssh-smba-servers && (viewItem == init-command || viewItem == server-command)",
+          "when": "view == smartssh-smba-servers && (viewItem == init-command || viewItem == server-command || viewItem == custom-command)",
           "group": "inline@1"
         },
         {

@@ -56,6 +56,7 @@ const mockCommands = [
 // 模拟工作区命令配置
 const mockWorkspaceCommands = [
   {
+    id: 'workspace-dev-server',
     name: '启动开发服务器',
     command: 'npm run dev',
     description: '启动开发环境',
@@ -92,4 +93,4 @@ module.exports = {
   mockWorkspaceCommands,
   mockConfiguration,
   mockWorkspaceConfiguration,
-}; 
+};

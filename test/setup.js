@@ -24,4 +24,13 @@ global.console = {
   debug: jest.fn(),
 };
 
-// vscode对象的模拟在各测试文件中单独导入 
+// 添加ESLint注释到所有测试文件头部，声明全局变量
+// 这个只是注释，不会真正影响文件内容，但可以作为提示
+/*
+以下注释应该添加到所有测试文件头部：
+
+/ *eslint-env jest* /
+/ *global jest, expect, test, describe, beforeEach, afterEach, beforeAll, afterAll* /
+*/
+
+// vscode对象的模拟通过moduleNameMapper在jest.config.js中配置

@@ -265,4 +265,4 @@ const vscode = {
   },
 };
 
-module.exports = vscode; 
+module.exports = vscode;
