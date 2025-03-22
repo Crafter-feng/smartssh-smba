@@ -31,6 +31,9 @@ module.exports = tseslint.config(
         rules: {
             eqeqeq: 'off',
             'no-unused-vars': 'off',
+            '@stylistic/no-trailing-spaces': 'off',
+            '@stylistic/comma-dangle': 'off',
+            '@stylistic/eol-last': 'off',
         },
     }
 );

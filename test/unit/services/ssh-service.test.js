@@ -26,14 +26,11 @@ jest.mock('../../../src/adapters/config-loader', () => ({
   }),
 }));
 
-// 模拟path-converter
-jest.mock('../../../src/services/path-converter', () => ({
-  findServerForPath: jest.fn(path => {
-    if (path.includes('Projects\\test1')) {
-      return { ...mockServers[0] };
-    }
-    return null;
-  }),
+// 模拟path-utils
+jest.mock('../../../src/utils/path-utils', () => ({
+  findServerForPath: jest.fn(),
+  convertLocalPathToRemote: jest.fn(),
+  convertRemotePathToLocal: jest.fn(),
 }));
 
 // 模拟command-exists
@@ -50,11 +47,19 @@ vscode.window.showErrorMessage = jest.fn();
 // 模拟terminal-manager
 const mockTerminalManager = {
   createSshTerminal: jest.fn(server => {
-    return vscode.window.createTerminal({ name: server.name });
+    return {
+      name: server.name,
+      sendText: jest.fn(),
+      show: jest.fn(),
+      dispose: jest.fn()
+    };
   }),
+  findTerminalsByServerName: jest.fn().mockReturnValue([]),
 };
 
-jest.mock('../../../src/services/terminal-manager', () => mockTerminalManager);
+jest.mock('../../../src/services/terminal-manager', () => {
+  return mockTerminalManager;
+});
 
 // 导入模块
 const sshService = require('../../../src/services/ssh-service');
@@ -123,6 +128,7 @@ describe('SSH Service Module', () => {
       expect(result).toEqual({
         success: true,
         terminal: mockTerminal,
+        isNew: true
       });
     });
 
@@ -173,6 +179,9 @@ describe('SSH Service Module', () => {
     test('should find server for local path', () => {
       // 准备
       const localPath = 'C:\\Projects\\test1\\src\\index.js';
+      
+      // 模拟路径查找返回第一个服务器
+      require('../../../src/utils/path-utils').findServerForPath.mockReturnValue(mockServers[0]);
 
       // 执行
       const result = sshService.findServerForPath(localPath);
@@ -186,7 +195,7 @@ describe('SSH Service Module', () => {
       const localPath = 'C:\\Other\\path\\file.js';
 
       // 模拟路径转换器行为
-      require('../../../src/services/path-converter').findServerForPath.mockReturnValue(null);
+      require('../../../src/utils/path-utils').findServerForPath.mockReturnValue(null);
 
       // 执行
       const result = sshService.findServerForPath(localPath);

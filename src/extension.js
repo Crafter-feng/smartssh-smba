@@ -7,6 +7,7 @@ const statusBar = require('./ui/status-bar');
 const { ServerTreeProvider } = require('./ui/tree-view/server-provider');
 const { CommandTreeProvider } = require('./ui/tree-view/command-provider');
 const configLoader = require('./adapters/config-loader');
+const terminalLinks = require('./ui/terminal-links');
 
 /**
  * 扩展激活入口点
@@ -63,22 +64,7 @@ function activate(context) {
     );
 
     // 注册文件路径点击处理
-    context.subscriptions.push(
-      vscode.commands.registerCommand('smartssh-smba.handlePathClick', path => {
-        if (path) {
-          try {
-            // 打开文件
-            const uri = vscode.Uri.file(path);
-            vscode.workspace.openTextDocument(uri).then(doc => {
-              vscode.window.showTextDocument(doc);
-            });
-          } catch (error) {
-            logger.error(`打开文件 ${path} 时出错:`, error);
-            vscode.window.showErrorMessage(`无法打开文件 ${path}: ${error.message}`);
-          }
-        }
-      })
-    );
+    terminalLinks.registerAll(context);
 
     // 加载初始服务器列表
     serverTreeProvider.refresh();

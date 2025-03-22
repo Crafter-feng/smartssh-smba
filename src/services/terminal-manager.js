@@ -5,11 +5,17 @@
 
 const vscode = require('vscode');
 const { logger } = require('../utils/logger');
-const { convertLocalPathToRemote } = require('./path-converter');
+const { convertLocalPathToRemote } = require('../utils/path-utils');
 
 // 全局存储所有连接的终端
 let globalTerminals = new Map();
 let terminalCounter = 0;
+
+// 事件处理器
+const eventHandlers = {
+  terminalCreated: [],
+  terminalClosed: []
+};
 
 // 终端管理器
 class TerminalManager {
@@ -22,6 +28,70 @@ class TerminalManager {
   }
 
   /**
+   * 添加终端创建事件监听器
+   * @param {Function} callback - 事件回调函数
+   * @returns {Function} - 移除监听器的函数
+   */
+  onTerminalCreated(callback) {
+    if (typeof callback === 'function') {
+      eventHandlers.terminalCreated.push(callback);
+      return () => {
+        const index = eventHandlers.terminalCreated.indexOf(callback);
+        if (index !== -1) {
+          eventHandlers.terminalCreated.splice(index, 1);
+        }
+      };
+    }
+    return () => { };
+  }
+
+  /**
+   * 添加终端关闭事件监听器
+   * @param {Function} callback - 事件回调函数
+   * @returns {Function} - 移除监听器的函数
+   */
+  onTerminalClosed(callback) {
+    if (typeof callback === 'function') {
+      eventHandlers.terminalClosed.push(callback);
+      return () => {
+        const index = eventHandlers.terminalClosed.indexOf(callback);
+        if (index !== -1) {
+          eventHandlers.terminalClosed.splice(index, 1);
+        }
+      };
+    }
+    return () => { };
+  }
+
+  /**
+   * 触发终端创建事件
+   * @param {Object} data - 事件数据
+   */
+  _triggerTerminalCreated(data) {
+    try {
+      for (const handler of eventHandlers.terminalCreated) {
+        handler(data);
+      }
+    } catch (error) {
+      logger.error(`触发终端创建事件时出错: ${error.message}`);
+    }
+  }
+
+  /**
+   * 触发终端关闭事件
+   * @param {Object} data - 事件数据
+   */
+  _triggerTerminalClosed(data) {
+    try {
+      for (const handler of eventHandlers.terminalClosed) {
+        handler(data);
+      }
+    } catch (error) {
+      logger.error(`触发终端关闭事件时出错: ${error.message}`);
+    }
+  }
+
+  /**
    * 处理终端关闭事件
    * @param {vscode.Terminal} terminal - 关闭的终端
    */
@@ -29,8 +99,14 @@ class TerminalManager {
     try {
       // 从记录中移除终端
       let removedKey = null;
+      let isSSH = false;
+      let serverName = null;
+
       for (const [name, details] of this.terminals.entries()) {
         if (details.terminal === terminal) {
+          isSSH = details.metadata && details.metadata.type === 'ssh';
+          serverName = isSSH ? (details.metadata.serverName || name.split(':')[0]) : null;
+
           this.terminals.delete(name);
           logger.info(`终端 ${name} 已关闭`);
           removedKey = name;
@@ -41,6 +117,13 @@ class TerminalManager {
       // 如果是SSH终端，记录日志
       if (removedKey && removedKey.includes(':SSH')) {
         logger.info(`SSH连接 ${removedKey} 已断开`);
+
+        // 触发终端关闭事件
+        this._triggerTerminalClosed({
+          name: removedKey,
+          isSSH,
+          serverName
+        });
       }
     } catch (error) {
       logger.error(`处理终端关闭事件时出错: ${error.message}`);
@@ -76,6 +159,16 @@ class TerminalManager {
       });
 
       logger.info(`已添加终端 ${terminalName} 到管理器`);
+
+      // 如果是SSH终端，触发创建事件
+      if (metadata.type === 'ssh') {
+        this._triggerTerminalCreated({
+          name: terminalName,
+          isSSH: true,
+          serverName: metadata.serverName || name
+        });
+      }
+
       return terminalName;
     } catch (error) {
       logger.error(`添加终端记录时出错: ${error.message}`);
@@ -160,11 +253,16 @@ class TerminalManager {
       const result = [];
       for (const [name, details] of this.terminals.entries()) {
         if (details.metadata && details.metadata.type === 'ssh') {
+          // 提取服务器名信息，优先使用metadata中的serverName，而不是从终端名称中解析
+          const serverName = details.metadata.serverName ||
+            (details.metadata.serverInfo ? details.metadata.serverInfo.name : null) ||
+            name.split(':')[0];
+
           result.push({
             name,
             terminal: details.terminal,
             metadata: details.metadata,
-            serverName: details.metadata.serverName || name.split(':')[0],
+            serverName: serverName,
           });
         }
       }
@@ -180,21 +278,20 @@ class TerminalManager {
    * @returns {Array} - 终端数组
    */
   getAllTerminals() {
+    const result = [];
     try {
-      const result = [];
       for (const [name, details] of this.terminals.entries()) {
         result.push({
           name,
           terminal: details.terminal,
-          metadata: details.metadata,
           isSSH: details.metadata && details.metadata.type === 'ssh',
+          serverName: details.metadata && details.metadata.type === 'ssh' ? details.metadata.serverName || name.split(':')[0] : null,
         });
       }
-      return result;
     } catch (error) {
-      logger.error(`获取所有终端时出错: ${error.message}`);
-      return [];
+      logger.error('获取所有终端时出错:', error);
     }
+    return result;
   }
 
   /**
@@ -282,13 +379,11 @@ class TerminalManager {
    * @returns {Object} - SSH命令信息
    */
   buildSshCommand(server) {
-    logger.functionStart('buildSshCommand', { serverName: server?.name });
     try {
+      logger.debug('buildSshCommand', { serverName: server?.name });
       // 检查服务器配置
       if (!server) {
-        logger.error('未提供服务器配置');
-        logger.functionEnd('buildSshCommand', { error: '未提供服务器配置' });
-        throw new Error('未提供服务器配置');
+        return { command: 'ssh', args: [], authMethod: 'byKey' };
       }
 
       // 构建基本命令
@@ -381,15 +476,15 @@ class TerminalManager {
         authMethod: authMethod,
       };
       logger.debug('SSH命令构建完成', { command, args });
-      logger.functionEnd('buildSshCommand', { result });
+      logger.debug('buildSshCommand 结束，没有错误');
       return result;
     } catch (error) {
       logger.error(`构建SSH命令时出错: ${error.message}`, error);
-      logger.functionEnd('buildSshCommand', { error: error.message });
+      logger.debug('buildSshCommand 结束，发生错误', { error: error.message });
       return {
         command: 'ssh',
         args: [],
-        authMethod: 'byKey',
+        authMethod: 'byKey'
       };
     }
   }
@@ -472,6 +567,81 @@ class TerminalManager {
       logger.info('已关闭所有终端');
     } catch (error) {
       logger.error(`关闭所有终端时出错: ${error.message}`);
+    }
+  }
+
+  /**
+   * 根据VSCode终端实例查找对应的终端信息
+   * @param {vscode.Terminal} terminal VSCode终端实例
+   * @returns {Object|null} 终端信息或null
+   */
+  findTerminalByVscodeTerminal(terminal) {
+    try {
+      for (const [name, details] of this.terminals.entries()) {
+        if (details.terminal === terminal) {
+          return {
+            name,
+            terminal: details.terminal,
+            isSSH: details.metadata && details.metadata.type === 'ssh',
+            serverName: details.metadata && details.metadata.type === 'ssh' ? details.metadata.serverName || name.split(':')[0] : null,
+          };
+        }
+      }
+    } catch (error) {
+      logger.error('根据VSCode终端查找终端信息时出错:', error);
+    }
+    return null;
+  }
+
+  /**
+   * 在终端中执行命令
+   * @param {Object} command - 命令对象 { command: 'xxx', name: 'xxx' }
+   * @returns {Promise<boolean>} - 执行结果
+   */
+  async executeCommandInTerminal(command) {
+    try {
+      logger.debug('executeCommandInTerminal', { command });
+      
+      // 验证命令有效性
+      if (!command) {
+        logger.warn('无效的命令: null');
+        return false;
+      }
+      
+      // 获取命令文本
+      let commandText = '';
+      if (typeof command === 'string') {
+        // 如果是字符串命令
+        commandText = command;
+      } else if (typeof command === 'object') {
+        if (command.command) {
+          commandText = command.command;
+        } else {
+          logger.warn('无效的命令对象格式');
+          return false;
+        }
+      } else {
+        logger.warn('无效的命令类型');
+        return false;
+      }
+      
+      // 创建或找到本地终端
+      const terminal = this.findOrCreateLocalTerminal('Command Terminal');
+      
+      if (!terminal) {
+        logger.error('无法创建或找到本地终端');
+        return false;
+      }
+      
+      // 发送命令到终端
+      terminal.show();
+      terminal.sendText(commandText);
+      
+      logger.info(`命令 ${commandText} 已发送到终端`);
+      return true;
+    } catch (error) {
+      logger.error(`executeCommandInTerminal 出错: ${error.message}`);
+      return false;
     }
   }
 }

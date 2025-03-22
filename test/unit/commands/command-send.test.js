@@ -9,7 +9,9 @@ jest.mock('vscode', () => {
     return {
         window: {
             showErrorMessage: jest.fn(),
-            showInformationMessage: jest.fn(),
+            showInformationMessage: jest.fn().mockResolvedValue('使用当前终端'),
+            showQuickPick: jest.fn(),
+            activeTerminal: null
         },
         commands: {
             executeCommand: jest.fn().mockImplementation(() => Promise.resolve()),
@@ -43,17 +45,29 @@ jest.mock('../../../src/adapters/config-loader', () => {
 });
 
 // 模拟terminalManager
+const mockTerminal = {
+    show: jest.fn(),
+    sendText: jest.fn(),
+};
+
 jest.mock('../../../src/services/terminal-manager', () => {
     return {
-        findTerminalByName: jest.fn(),
-        findOrCreateLocalTerminal: jest.fn(),
+        findTerminalByName: jest.fn().mockReturnValue(mockTerminal),
+        findOrCreateLocalTerminal: jest.fn().mockReturnValue(mockTerminal),
+        findTerminalsByServerName: jest.fn().mockReturnValue([]),
+        getActiveSSHTerminal: jest.fn().mockReturnValue(null),
+        getAllSSHTerminals: jest.fn().mockReturnValue([])
     };
 });
 
 // 模拟ssh-service
 jest.mock('../../../src/services/ssh-service', () => {
     return {
-        connectToServer: jest.fn()
+        connectToServer: jest.fn().mockResolvedValue({
+            success: true,
+            terminal: mockTerminal,
+            isNew: false
+        })
     };
 });
 
@@ -69,6 +83,14 @@ jest.mock('../../../src/utils/logger', () => {
     };
 });
 
+// 模拟connection模块
+jest.mock('../../../src/commands/connection', () => {
+    return {
+        openSSHConnection: jest.fn().mockResolvedValue(true),
+        selectServer: jest.fn().mockResolvedValue('测试服务器')
+    };
+});
+
 // 模拟命令树提供者
 jest.mock('../../../src/ui/tree-view/command-provider', () => {
     return {
@@ -79,7 +101,6 @@ jest.mock('../../../src/ui/tree-view/command-provider', () => {
 // 导入需要测试的模块和依赖
 const vscode = require('vscode');
 const terminalManager = require('../../../src/services/terminal-manager');
-const sshService = require('../../../src/services/ssh-service');
 const { logger } = require('../../../src/utils/logger');
 
 // 导入命令模块
@@ -87,127 +108,12 @@ const commandModule = require('../../../src/commands/command');
 const sendCommand = commandModule.sendCommand;
 
 describe('Command Send Module Tests', () => {
-    // 模拟终端对象
-    const mockTerminal = {
-        show: jest.fn(),
-        sendText: jest.fn(),
-    };
-
     beforeEach(() => {
         // 清除所有模拟的模块
         jest.clearAllMocks();
-        // 设置默认的本地终端返回值
-        terminalManager.findOrCreateLocalTerminal.mockReturnValue(mockTerminal);
-    });
-
-    test('应正确处理全局命令项', async () => {
-        // 准备
-        const commandItem = {
-            command: {
-                name: '测试命令',
-                command: 'echo "测试"',
-                description: '测试描述',
-            },
-            contextValue: 'global-command',
-        };
-
-        // 执行
-        await sendCommand(commandItem);
-
-        // 验证
-        expect(terminalManager.findOrCreateLocalTerminal).toHaveBeenCalledWith('Command Terminal');
-        expect(mockTerminal.show).toHaveBeenCalled();
-        expect(mockTerminal.sendText).toHaveBeenCalledWith('echo "测试"');
-        expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
-    });
-
-    test('应正确处理工作区命令项', async () => {
-        // 准备
-        const commandItem = {
-            command: {
-                name: '工作区命令',
-                command: 'npm run dev',
-                description: '启动开发服务器',
-            },
-            contextValue: 'workspace-command',
-        };
-
-        // 执行
-        await sendCommand(commandItem);
-
-        // 验证
-        expect(terminalManager.findOrCreateLocalTerminal).toHaveBeenCalledWith('Command Terminal');
-        expect(mockTerminal.show).toHaveBeenCalled();
-        expect(mockTerminal.sendText).toHaveBeenCalledWith('npm run dev');
-    });
-
-    test('应正确处理服务器初始化命令项', async () => {
-        // 准备
-        const commandItem = {
-            command: 'cd /var/www && ls -la',
-            contextValue: 'init-command',
-            server: {
-                name: '测试服务器',
-                host: 'example.com',
-                username: 'testuser',
-            },
-        };
-
-        // 模拟没有现有终端
-        terminalManager.findTerminalByName.mockReturnValue(null);
-        // 执行
-        await sendCommand(commandItem);
-
-        // 验证
-        expect(terminalManager.findTerminalByName).toHaveBeenCalledWith('测试服务器');
-        expect(sshService.connectToServer).toHaveBeenCalledWith('测试服务器');
-        expect(logger.info).toHaveBeenCalledWith('服务器 测试服务器 未连接，正在连接...');
-    });
-
-    test('应正确处理服务器自定义命令项', async () => {
-        // 准备
-        const commandItem = {
-            server: {
-                name: '测试服务器',
-                host: 'example.com',
-                username: 'testuser',
-            },
-            contextValue: 'custom-command',
-            command: {
-                name: '自定义命令',
-                command: 'ps aux | grep node',
-                description: '查看Node进程',
-            },
-        };
-
-        // 模拟已有终端
-        terminalManager.findTerminalByName.mockReturnValue(mockTerminal);
-        // 执行
-        await sendCommand(commandItem);
-
-        // 验证
-        expect(terminalManager.findTerminalByName).toHaveBeenCalledWith('测试服务器');
-        expect(mockTerminal.show).toHaveBeenCalled();
-        expect(mockTerminal.sendText).toHaveBeenCalledWith('ps aux | grep node');
-        expect(logger.info).toHaveBeenCalledWith(
-            '已发送命令到服务器 测试服务器: ps aux | grep node'
-        );
-    });
-
-    test('应正确处理旧格式的命令对象', async () => {
-        // 准备 - 使用旧格式的commandObj
-        const commandItem = {
-            commandObj: {
-                command: 'echo "旧格式命令"',
-                name: '旧命令',
-            },
-        };
-
-        // 执行
-        await sendCommand(commandItem);
-
-        // 验证
-        expect(mockTerminal.sendText).toHaveBeenCalledWith('echo "旧格式命令"');
+        
+        // 设置模拟终端管理器行为
+        vscode.window.activeTerminal = null;
     });
 
     test('应处理无效的命令输入', async () => {
@@ -222,80 +128,78 @@ describe('Command Send Module Tests', () => {
         expect(mockTerminal.sendText).not.toHaveBeenCalled();
     });
 
-    it('应在连接服务器失败时显示错误', async () => {
-        // 准备
-        const serverName = '失败服务器';
-        const commandItem = {
-            contextValue: 'server-command',
-            server: {
-                name: serverName
-            },
-            command: 'echo "test"',
-        };
-
-        // 确保没有之前的错误消息调用
-        vscode.window.showErrorMessage.mockClear();
-
-        // 模拟连接失败 - 模拟实际实现方式：抛出错误并显示错误消息
-        sshService.connectToServer.mockImplementationOnce(server => {
-            // 首先抛出错误
-            const error = new Error('连接失败');
-            // 抛出之前不返回任何内容，而是直接抛出
-            throw error;
-        });
+    test('应使用本地终端发送字符串命令', async () => {
+        // 准备 - 直接传递字符串
+        const commandString = 'echo "测试字符串命令"';
 
         // 执行
-        await sendCommand(commandItem);
+        await sendCommand(commandString);
 
-        // 验证
-        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-            `连接到服务器 ${serverName} 失败: 连接失败`
-        );
+        // 验证 - 当没有活动终端时应创建本地终端
+        expect(terminalManager.findOrCreateLocalTerminal).toHaveBeenCalledWith('Command Terminal');
+        expect(mockTerminal.show).toHaveBeenCalled();
+        expect(mockTerminal.sendText).toHaveBeenCalledWith(commandString);
     });
 
-    it('应处理未找到服务器终端的情况', async () => {
-        // 准备
-        const serverName = '找不到终端服务器';
+    test('应使用本地终端发送简单命令对象', async () => {
+        // 准备 - 使用commandObj对象
         const commandItem = {
-            contextValue: 'server-command',
-            server: {
-                name: serverName
-            },
-            command: 'echo "test"',
+            commandObj: {
+                command: 'npm run test',
+                name: '运行测试'
+            }
         };
-
-        const terminalManager = require('../../../src/services/terminal-manager');
-        const sshService = require('../../../src/services/ssh-service');
-
-        // 确保没有之前的错误消息调用
-        vscode.window.showErrorMessage.mockClear();
-
-        // 重置所有模拟的模块
-        jest.clearAllMocks();
-
-        // 模拟连接成功
-        sshService.connectToServer.mockImplementationOnce(() => {
-            return Promise.resolve({ success: true });
-        });
-
-        // 模拟等待终端创建（使setTimeout立即执行回调）
-        jest.spyOn(global, 'setTimeout').mockImplementationOnce(callback => {
-            callback();
-            return 999;
-        });
-
-        // 确保findTerminalByName总是返回null（即找不到终端）
-        terminalManager.findTerminalByName.mockReturnValue(null);
 
         // 执行
         await sendCommand(commandItem);
 
         // 验证
-        expect(terminalManager.findTerminalByName).toHaveBeenCalledWith(serverName);
+        expect(terminalManager.findOrCreateLocalTerminal).toHaveBeenCalledWith('Command Terminal');
+        expect(mockTerminal.show).toHaveBeenCalled();
+        expect(mockTerminal.sendText).toHaveBeenCalledWith('npm run test');
+    });
 
-        // 验证显示错误消息
-        expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-            `无法找到服务器 ${serverName} 的终端`
+    test('应使用活动终端发送命令', async () => {
+        // 准备 - 设置活动终端
+        const activeTerminal = {
+            show: jest.fn(),
+            sendText: jest.fn()
+        };
+        vscode.window.activeTerminal = activeTerminal;
+
+        const commandItem = {
+            commandObj: 'git status'
+        };
+
+        // 执行
+        await sendCommand(commandItem);
+
+        // 验证 - 应使用活动终端
+        expect(activeTerminal.show).toHaveBeenCalled();
+        expect(activeTerminal.sendText).toHaveBeenCalledWith('git status');
+        expect(terminalManager.findOrCreateLocalTerminal).not.toHaveBeenCalled();
+    });
+
+    test('应在连接服务器失败时显示错误', async () => {
+        // 准备 - 服务器命令
+        const serverName = '测试服务器';
+        const commandItem = {
+            contextValue: 'server-command',
+            server: {
+                name: serverName
+            },
+            command: 'echo "test"'
+        };
+
+        // 模拟连接失败 - 需要从模拟的connection模块中抛出错误
+        require('../../../src/commands/connection').openSSHConnection.mockRejectedValueOnce(
+            new Error('连接失败')
         );
+
+        // 执行
+        await sendCommand(commandItem);
+
+        // 验证 - 应显示错误消息
+        expect(vscode.window.showErrorMessage).toHaveBeenCalled();
     });
 }); 

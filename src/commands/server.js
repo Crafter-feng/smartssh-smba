@@ -174,6 +174,10 @@ async function selectServerForEdit() {
       return null;
     }
 
+    if (serverList.length === 1) {
+      return serverList[0].name;
+    }
+
     // 创建选择项
     const items = serverList.map(server => ({
       label: server.name,
