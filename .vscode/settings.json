@@ -1,0 +1,38 @@
+{
+  "files.exclude": {
+    "**/.git": true,
+    "**/node_modules": true
+  },
+  "smartssh-smba.config": {
+    "showHostsInPickLists": false,
+    "serverList": [
+      {
+        "name": "100.101.25.87",
+        "host": "100.101.25.87",
+        "username": "root",
+        "password": "123456",
+        "port": 22,
+        "smbMapping": {
+          "localPath": "C:\\",
+          "remotePath": "/home/root/"
+        },
+        "customCommands": ["ls -al"]
+      }
+    ],
+    "customCommands": [
+      {
+        "name": "ls",
+        "command": "ls",
+        "description": "列出当前目录文件"
+      }
+    ],
+    "enableLocalCommands": true
+  },
+  "smartssh-smba.localCommands": [
+    {
+      "name": "构建项目",
+      "command": "npm run build",
+      "description": "构建当前项目"
+    }
+  ]
+}
