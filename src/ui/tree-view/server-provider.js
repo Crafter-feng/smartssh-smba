@@ -303,7 +303,8 @@ class ServerTreeProvider {
     }
 
     // 添加路径映射组（如果有）
-    const hasPathMappings = server.pathMappings && server.pathMappings.length > 0;
+    const hasPathMappings = (server.pathMappings && server.pathMappings.length > 0) ||
+      (server.smbMappingList && server.smbMappingList.length > 0);
 
     if (hasPathMappings) {
       children.push(
@@ -334,9 +335,12 @@ class ServerTreeProvider {
 
     for (const key of configKeys) {
       if (server[key] !== undefined) {
+        const label = key.charAt(0).toUpperCase() + key.slice(1);
+        const description = key === 'port' ? server[key].toString() : server[key];
+        
         nodes.push(
           new ServerTreeItem(
-            key.charAt(0).toUpperCase() + key.slice(1),
+            label,
             vscode.TreeItemCollapsibleState.None,
             server,
             'config',
@@ -420,6 +424,27 @@ class ServerTreeProvider {
               remotePath: mapping.remotePath,
               description: `映射到 ${mapping.remotePath || '未指定'}`,
               index: index,
+            }
+          )
+        );
+      });
+    }
+
+    // 处理smbMappingList
+    if (server.smbMappingList && Array.isArray(server.smbMappingList)) {
+      server.smbMappingList.forEach((mapping, index) => {
+        nodes.push(
+          new ServerTreeItem(
+            `本地 ${mapping.localPath || '未指定'}`,
+            vscode.TreeItemCollapsibleState.Collapsed,
+            server,
+            'smb-mapping',
+            null,
+            {
+              localPath: mapping.localPath,
+              remotePath: mapping.remotePath,
+              description: `映射到 ${mapping.remotePath || '未指定'}`,
+              index: index + (server.pathMappings ? server.pathMappings.length : 0),
             }
           )
         );

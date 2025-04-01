@@ -6,7 +6,7 @@
 const vscode = require('vscode');
 const { logger } = require('../utils/logger');
 const { convertLocalPathToRemote } = require('../utils/path-utils');
-const configLoader = require('../utils/config-loader');
+const configLoader = require('../adapters/config-loader');
 
 // 全局存储所有连接的终端
 let globalTerminals = new Map();
@@ -349,7 +349,7 @@ class TerminalManager {
         name: baseName,
         shellPath: process.platform === 'win32' ? 'cmd.exe' : 'bash',
       });
-
+      terminal.show();
       // 添加到记录
       const terminalName = this.addTerminal(server.name, terminal, {
         type: 'ssh',
@@ -595,58 +595,6 @@ class TerminalManager {
   }
 
   /**
-   * 在终端中执行命令
-   * @param {Object} command - 命令对象 { command: 'xxx', name: 'xxx' }
-   * @returns {Promise<boolean>} - 执行结果
-   */
-  async executeCommandInTerminal(command) {
-    try {
-      logger.debug('executeCommandInTerminal', { command });
-      
-      // 验证命令有效性
-      if (!command) {
-        logger.warn('无效的命令: null');
-        return false;
-      }
-      
-      // 获取命令文本
-      let commandText = '';
-      if (typeof command === 'string') {
-        // 如果是字符串命令
-        commandText = command;
-      } else if (typeof command === 'object') {
-        if (command.command) {
-          commandText = command.command;
-        } else {
-          logger.warn('无效的命令对象格式');
-          return false;
-        }
-      } else {
-        logger.warn('无效的命令类型');
-        return false;
-      }
-      
-      // 创建或找到本地终端
-      const terminal = this.findOrCreateLocalTerminal('Command Terminal');
-      
-      if (!terminal) {
-        logger.error('无法创建或找到本地终端');
-        return false;
-      }
-      
-      // 发送命令到终端
-      terminal.show();
-      terminal.sendText(commandText);
-      
-      logger.info(`命令 ${commandText} 已发送到终端`);
-      return true;
-    } catch (error) {
-      logger.error(`executeCommandInTerminal 出错: ${error.message}`);
-      return false;
-    }
-  }
-
-  /**
    * 连接到服务器
    * @param {string} serverName - 服务器名称
    * @param {boolean} [showQuickPick=true] - 是否显示快速选择对话框
@@ -707,6 +655,242 @@ class TerminalManager {
       logger.error(`连接到服务器失败: ${error.message}`);
       vscode.window.showErrorMessage(`连接到服务器失败: ${error.message}`);
       return false;
+    }
+  }
+
+  /**
+   * 获取或创建SSH终端
+   * @param {string|Object} serverParam - 服务器名称或服务器对象
+   * @param {boolean} [showQuickPick=true] - 是否显示快速选择对话框
+   * @returns {Promise<Object>} - 返回包含终端、服务器名称和连接状态的对象
+   */
+  async getOrCreateSSHTerminal(serverParam, showQuickPick = true) {
+    try {
+      let serverName = null;
+      let server = null;
+      let isNewConnection = false;
+
+      // 解析服务器参数
+      if (typeof serverParam === 'string') {
+        // 如果是字符串，作为服务器名称
+        serverName = serverParam;
+      } else if (serverParam && typeof serverParam === 'object') {
+        // 如果是对象，尝试获取服务器名称
+        if (serverParam.name) {
+          serverName = serverParam.name;
+          server = serverParam;
+        } else if (serverParam.label) {
+          serverName = serverParam.label;
+        } else if (serverParam.server && serverParam.server.name) {
+          serverName = serverParam.server.name;
+          server = serverParam.server;
+        } else if (serverParam.configuration && serverParam.configuration.name) {
+          serverName = serverParam.configuration.name;
+          server = serverParam.configuration;
+        }
+      }
+
+      // 如果有服务器名称，先检查是否已连接
+      if (serverName) {
+        logger.debug(`检查服务器 ${serverName} 是否已连接`);
+
+        // 查找该服务器的所有终端
+        const serverTerminals = this.findTerminalsByServerName(serverName);
+
+        // 如果已有终端连接
+        if (serverTerminals.length > 0) {
+          logger.debug(`服务器 ${serverName} 已有 ${serverTerminals.length} 个连接`);
+
+          // 首先检查活动终端是否是该服务器的终端
+          const activeSSHTerminal = this.getActiveSSHTerminal();
+          if (activeSSHTerminal &&
+            activeSSHTerminal.metadata &&
+            activeSSHTerminal.metadata.serverName === serverName) {
+            logger.debug(`使用活动的SSH终端 ${activeSSHTerminal.name}`);
+            activeSSHTerminal.terminal.show();
+            return {
+              terminal: activeSSHTerminal.terminal,
+              serverName,
+              isNewConnection: false
+            };
+          }
+
+          // 否则使用第一个找到的终端
+          logger.debug(`使用第一个找到的SSH终端 ${serverTerminals[0].name}`);
+          return {
+            terminal: serverTerminals[0].terminal,
+            serverName,
+            isNewConnection: false
+          };
+        }
+
+        // 如果没有终端连接，创建新连接
+        logger.info(`服务器 ${serverName} 未连接，正在连接...`);
+
+        // 如果已经有server对象，直接使用
+        if (!server) {
+          server = await configLoader.getServerByName(serverName);
+          if (!server) {
+            logger.error(`找不到服务器: ${serverName}`);
+          }
+        }
+
+        // 创建SSH终端
+        const terminal = this.createSshTerminal(server);
+        if (!terminal) {
+          logger.error(`无法创建到服务器 ${serverName} 的终端`);
+        }
+
+        isNewConnection = true;
+        return {
+          terminal,
+          serverName,
+          isNewConnection
+        };
+      }
+
+      // 如果没有指定服务器，获取所有SSH终端
+      const sshTerminals = this.getAllSSHTerminals();
+
+      // 如果有SSH终端
+      if (sshTerminals.length > 0) {
+        // 如果只有一个SSH终端，直接使用
+        if (sshTerminals.length === 1) {
+          logger.debug(`使用唯一的SSH终端 ${sshTerminals[0].name}`);
+          sshTerminals[0].terminal.show();
+          return {
+            terminal: sshTerminals[0].terminal,
+            serverName: sshTerminals[0].serverName,
+            isNewConnection: false
+          };
+        }
+
+        // 如果有活动的SSH终端，优先使用
+        const activeSSHTerminal = this.getActiveSSHTerminal();
+        if (activeSSHTerminal) {
+          logger.debug(`使用活动的SSH终端 ${activeSSHTerminal.name}`);
+          activeSSHTerminal.terminal.show();
+          return {
+            terminal: activeSSHTerminal.terminal,
+            serverName: activeSSHTerminal.metadata ? activeSSHTerminal.metadata.serverName : null,
+            isNewConnection: false
+          };
+        }
+
+        // 如果需要显示选择对话框且有多个SSH终端
+        if (showQuickPick) {
+          // 创建选择项
+          const terminalItems = sshTerminals.map(t => ({
+            label: t.serverName || t.name.split(':')[0],
+            description: t.metadata && t.metadata.serverInfo ?
+              `${t.metadata.serverInfo.username}@${t.metadata.serverInfo.host}` : '',
+            detail: t.name,
+            terminal: t.terminal
+          }));
+
+          // 显示快速选择
+          const selected = await vscode.window.showQuickPick(
+            terminalItems,
+            { placeHolder: '选择目标SSH终端' }
+          );
+
+          if (selected) {
+            logger.debug(`用户选择了SSH终端 ${selected.label}`);
+            return {
+              terminal: selected.terminal,
+              serverName: selected.label,
+              isNewConnection: false
+            };
+          }
+        }
+      }
+
+      // 如果没有SSH终端或用户取消选择
+      if (showQuickPick) {
+        // 询问用户是否连接新服务器
+        const result = await vscode.window.showInformationMessage(
+          '没有活动的SSH连接。请选择操作:',
+          '连接服务器',
+          '使用当前终端',
+          '取消'
+        );
+
+        if (result === '连接服务器') {
+          // 获取服务器列表
+          const serverList = configLoader.getServerList();
+          if (!serverList || serverList.length === 0) {
+            vscode.window.showInformationMessage('没有配置服务器，请先添加服务器');
+            return { terminal: null, serverName: null, isNewConnection: false };
+          }
+
+          // 如果只有一个服务器，直接连接
+          if (serverList.length === 1) {
+            const serverConfig = serverList[0];
+            const terminal = this.createSshTerminal(serverConfig);
+            if (terminal) {
+              terminal.show();
+              return {
+                terminal,
+                serverName: serverConfig.name,
+                isNewConnection: true
+              };
+            }
+          }
+
+          // 创建选择项
+          const items = serverList.map(server => ({
+            label: server.name,
+            description: `${server.username}@${server.host}`,
+          }));
+
+          // 显示快速选择
+          const selection = await vscode.window.showQuickPick(items, {
+            placeHolder: '选择一个服务器',
+          });
+
+          if (selection) {
+            const serverName = selection.label;
+            const serverConfig = await configLoader.getServerByName(serverName);
+            if (!serverConfig) {
+              throw new Error(`找不到服务器: ${serverName}`);
+            }
+
+            const terminal = this.createSshTerminal(serverConfig);
+            if (terminal) {
+              return {
+                terminal,
+                serverName,
+                isNewConnection: true
+              };
+            }
+          }
+        } else if (result === '使用当前终端') {
+          // 使用当前活动的终端，如果没有则创建一个
+          const activeTerminal = vscode.window.activeTerminal;
+          if (activeTerminal) {
+            return {
+              terminal: activeTerminal,
+              serverName: null,
+              isNewConnection: false
+            };
+          } else {
+            const localTerminal = this.findOrCreateLocalTerminal('Command Terminal');
+            localTerminal.show();
+            return {
+              terminal: localTerminal,
+              serverName: null,
+              isNewConnection: true
+            };
+          }
+        }
+      }
+
+      // 如果没有可用终端或用户取消
+      return { terminal: null, serverName: null, isNewConnection: false };
+    } catch (error) {
+      logger.error(`获取SSH终端时出错: ${error.message}`);
+      vscode.window.showErrorMessage(`获取SSH终端时出错: ${error.message}`);
+      return { terminal: null, serverName: null, isNewConnection: false };
     }
   }
 }

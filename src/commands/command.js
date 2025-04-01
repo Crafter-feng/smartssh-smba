@@ -8,6 +8,15 @@ const configLoader = require('../adapters/config-loader');
 const terminalManager = require('../services/terminal-manager');
 const { logger } = require('../utils/logger');
 const { CommandTreeProvider } = require('../ui/tree-view/command-provider');
+const { ServerTreeProvider } = require('../ui/tree-view/server-provider');
+const {
+  addServer,
+  editServer,
+  deleteServer,
+  refreshServerList,
+  connectToServer,
+  fastOpenConnection
+} = require('./server');
 
 // 命令树提供者实例，在register函数中初始化
 let commandTreeProvider;
@@ -258,23 +267,21 @@ async function sendCommand(commandItem) {
 
     // 获取命令文本
     let commandText = '';
-    let serverName = null;
-    let server = null;
+    let serverParam = null;
+    let isInitCommand = false;
 
     // 处理不同类型的命令项
     if (typeof commandItem === 'string') {
       // 如果是字符串命令
       commandText = commandItem;
-    }
-    else if (commandItem.commandObj) {
+    } else if (commandItem.commandObj) {
       // 从commandObj获取命令内容 - 树视图项的主要存储方式
       if (typeof commandItem.commandObj === 'object' && commandItem.commandObj.command) {
         commandText = commandItem.commandObj.command;
       } else if (typeof commandItem.commandObj === 'string') {
         commandText = commandItem.commandObj;
       }
-    }
-    else if (commandItem.label) {
+    } else if (commandItem.label) {
       // 尝试使用标签作为命令（备选方案）
       commandText = commandItem.label;
     }
@@ -286,235 +293,38 @@ async function sendCommand(commandItem) {
       return;
     }
 
-    // 服务器列表中的命令处理
+    // 检查命令项是否关联服务器和是否是初始化命令
     if (commandItem.server) {
-      // 如果命令项有服务器属性
-      server = commandItem.server;
-      serverName = server.name;
-      logger.debug(`命令关联的服务器: ${serverName}`);
-
-      // 检查是否是初始化命令或服务器命令
-      const isInitCommand = commandItem.contextValue === 'init-command';
-      const isServerCommand = commandItem.contextValue === 'server-command' ||
-        commandItem.contextValue === 'custom-command';
-
-      logger.debug(`命令类型: ${commandItem.contextValue}`);
-
-      // 处理SSH终端命令
-      if (isInitCommand || isServerCommand) {
-        // 查找该服务器的所有终端
-        const serverTerminals = terminalManager.findTerminalsByServerName(serverName);
-
-        // 如果有该服务器的终端
-        if (serverTerminals.length > 0) {
-          // 初始化命令和服务器已连接的情况
-          let targetTerminal = null;
-
-          // 1. 检查当前活动终端是否是该服务器的终端
-          const activeSSHTerminal = terminalManager.getActiveSSHTerminal();
-          if (activeSSHTerminal &&
-            activeSSHTerminal.metadata &&
-            activeSSHTerminal.metadata.serverName === serverName) {
-            targetTerminal = activeSSHTerminal.terminal;
-          }
-          // 2. 如果没有活动的服务器终端，使用第一个找到的终端
-          else if (serverTerminals.length > 0) {
-            targetTerminal = serverTerminals[0].terminal;
-          }
-
-          if (targetTerminal) {
-            targetTerminal.show();
-            targetTerminal.sendText(commandText);
-            logger.info(`已发送命令到服务器 ${serverName} 终端: ${commandText}`);
-            return;
-          }
-        }
-
-        // 如果没有该服务器的终端或无法找到目标终端
-        if (isInitCommand) {
-          // 如果是初始化命令且服务器未连接，则连接服务器
-          logger.info(`服务器 ${serverName} 未连接，正在连接...`);
-          try {
-            // 使用terminal-manager创建SSH连接
-            const connected = await terminalManager.connectToServer(serverName, false);
-            if (connected) {
-              logger.info(`服务器 ${serverName} 连接已触发，初始化命令将自动执行`);
-              return;
-            }
-          } catch (error) {
-            logger.error(`连接到服务器 ${serverName} 失败: ${error.message}`);
-            vscode.window.showErrorMessage(`连接到服务器 ${serverName} 失败: ${error.message}`);
-            return;
-          }
-        } else {
-          // 如果是其他服务器命令，需要先连接服务器
-          logger.info(`服务器 ${serverName} 未连接，正在连接...`);
-          try {
-            // 使用terminal-manager创建SSH连接
-            const connected = await terminalManager.connectToServer(serverName, false);
-            if (!connected) {
-              throw new Error(`无法连接到服务器 ${serverName}`);
-            }
-
-            // 等待终端创建
-            await new Promise(resolve => setTimeout(resolve, 1000));
-
-            // 查找新创建的终端
-            const newServerTerminals = terminalManager.findTerminalsByServerName(serverName);
-            if (newServerTerminals.length > 0) {
-              const terminal = newServerTerminals[0].terminal;
-              terminal.show();
-              terminal.sendText(commandText);
-              logger.info(`已发送命令到服务器 ${serverName} 新终端: ${commandText}`);
-            } else {
-              logger.error(`无法找到服务器 ${serverName} 的终端`);
-              vscode.window.showErrorMessage(`无法找到服务器 ${serverName} 的终端`);
-            }
-            return;
-          } catch (error) {
-            logger.error(`连接到服务器 ${serverName} 失败: ${error.message}`);
-            vscode.window.showErrorMessage(`连接到服务器 ${serverName} 失败: ${error.message}`);
-            return;
-          }
-        }
-      }
-    }
-    // 扩展命令和无服务器关联的命令处理
-    else {
-      // 获取所有SSH终端
-      const sshTerminals = terminalManager.getAllSSHTerminals();
-
-      // 如果有SSH终端
-      if (sshTerminals.length > 0) {
-        // 1. 检查当前活动的终端是否是SSH终端
-        const activeSSHTerminal = terminalManager.getActiveSSHTerminal();
-        if (activeSSHTerminal) {
-          // 如果有活动的SSH终端，直接使用
-          activeSSHTerminal.terminal.show();
-          activeSSHTerminal.terminal.sendText(commandText);
-          logger.info(`已发送命令到活动的SSH终端 ${activeSSHTerminal.name}: ${commandText}`);
-          return;
-        }
-
-        // 2. 如果只有一个SSH终端，直接使用
-        if (sshTerminals.length === 1) {
-          const terminal = sshTerminals[0].terminal;
-          terminal.show();
-          terminal.sendText(commandText);
-          logger.info(`已发送命令到唯一的SSH终端 ${sshTerminals[0].name}: ${commandText}`);
-          return;
-        }
-
-        // 3. 如果有多个SSH终端，让用户选择
-        const terminalItems = sshTerminals.map(t => ({
-          label: t.serverName || t.name.split(':')[0],
-          description: t.metadata && t.metadata.serverInfo ?
-            `${t.metadata.serverInfo.username}@${t.metadata.serverInfo.host}` : '',
-          detail: t.name,
-          terminal: t.terminal
-        }));
-
-        const selected = await vscode.window.showQuickPick(
-          terminalItems,
-          { placeHolder: '选择目标SSH终端' }
-        );
-
-        if (selected) {
-          selected.terminal.show();
-          selected.terminal.sendText(commandText);
-          logger.info(`已发送命令到选定的SSH终端 ${selected.label}: ${commandText}`);
-          return;
-        }
-      }
-
-      // 如果没有SSH终端或用户取消选择，询问是否连接新服务器或使用当前终端
-      const result = await vscode.window.showInformationMessage(
-        '没有活动的SSH连接。请选择操作:',
-        '连接服务器',
-        '使用当前终端',
-        '取消'
-      );
-
-      if (result === '连接服务器') {
-        // 使用terminal-manager创建SSH连接
-        try {
-          // 获取服务器列表
-          const serverList = configLoader.getServerList();
-          if (!serverList || serverList.length === 0) {
-            vscode.window.showInformationMessage('没有配置服务器，请先添加服务器');
-            return;
-          }
-
-          // 创建选择项
-          const items = serverList.map(server => ({
-            label: server.name,
-            description: `${server.username}@${server.host}`,
-          }));
-
-          // 显示快速选择
-          const selection = await vscode.window.showQuickPick(items, {
-            placeHolder: '选择一个服务器',
-          });
-
-          if (selection) {
-            const serverName = selection.label;
-            const serverConfig = await configLoader.getServerByName(serverName);
-            if (!serverConfig) {
-              throw new Error(`找不到服务器: ${serverName}`);
-            }
-            terminalManager.createSshTerminal(serverConfig);
-
-            // 等待终端创建完成
-            await new Promise(resolve => setTimeout(resolve, 1000));
-
-            // 查找新创建的服务器终端
-            const newServerTerminals = terminalManager.findTerminalsByServerName(serverName);
-            if (newServerTerminals.length > 0) {
-              const terminal = newServerTerminals[0].terminal;
-              terminal.show();
-              terminal.sendText(commandText);
-              logger.info(`已发送命令到新连接的服务器 ${serverName} 终端: ${commandText}`);
-            } else {
-              logger.error(`无法找到新连接的服务器 ${serverName} 终端`);
-              vscode.window.showErrorMessage(`无法找到新连接的服务器 ${serverName} 终端`);
-            }
-          }
-        } catch (error) {
-          logger.error(`连接服务器失败: ${error.message}`);
-          vscode.window.showErrorMessage(`连接服务器失败: ${error.message}`);
-        }
-        return;
-      } else if (result === '使用当前终端') {
-        // 使用当前活动的终端，如果没有则创建一个
-        const activeTerminal = vscode.window.activeTerminal;
-        if (activeTerminal) {
-          activeTerminal.show();
-          activeTerminal.sendText(commandText);
-          logger.info(`已发送命令到当前终端: ${commandText}`);
-        } else {
-          const localTerminal = terminalManager.findOrCreateLocalTerminal('Command Terminal');
-          localTerminal.show();
-          localTerminal.sendText(commandText);
-          logger.info(`已发送命令到本地终端: ${commandText}`);
-        }
-        return;
-      } else {
-        // 用户取消
-        return;
-      }
+      serverParam = commandItem.server;
+      isInitCommand = commandItem.contextValue === 'init-command';
     }
 
-    // 如果代码执行到这里，尝试使用当前活动终端
-    const activeTerminal = vscode.window.activeTerminal;
-    if (activeTerminal) {
-      activeTerminal.show();
-      activeTerminal.sendText(commandText);
-      logger.info(`已发送命令到当前终端: ${commandText}`);
+    // 获取或创建SSH终端
+    const { terminal, serverName, isNewConnection } = await terminalManager.getOrCreateSSHTerminal(serverParam);
+
+    // 如果没有获取到终端
+    if (!terminal) {
+      logger.warn('未能获取有效的终端');
+      return;
+    }
+
+    // 显示终端
+    terminal.show();
+
+    // 如果是新连接且请求的是初始化命令，不发送命令（因为初始化命令会在创建终端时自动执行）
+    if (isNewConnection && isInitCommand) {
+      logger.info(`新建连接到服务器 ${serverName}，初始化命令将自动执行`);
+      return;
+    }
+
+    // 发送命令到终端
+    terminal.sendText(commandText);
+
+    // 记录日志
+    if (serverName) {
+      logger.info(`已发送命令到服务器 ${serverName} 终端: ${commandText}`);
     } else {
-      const localTerminal = terminalManager.findOrCreateLocalTerminal('Command Terminal');
-      localTerminal.show();
-      localTerminal.sendText(commandText);
-      logger.info(`已发送命令到本地终端: ${commandText}`);
+      logger.info(`已发送命令到终端: ${commandText}`);
     }
   } catch (error) {
     logger.error(`发送命令时出错: ${error.message}`);
@@ -579,6 +389,45 @@ function openWorkspaceCommandsSettings() {
   } catch (error) {
     logger.error(`打开工作区命令设置失败: ${error.message}`);
     vscode.window.showErrorMessage(`打开工作区命令设置失败: ${error.message}`);
+  }
+}
+
+/**
+ * 创建工作区设置
+ */
+async function createWorkspaceSettings() {
+  try {
+    // 检查当前是否有活动的工作区
+    if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
+      vscode.window.showWarningMessage('请先打开一个工作区文件夹');
+      return;
+    }
+
+    // 获取当前工作区配置
+    const config = vscode.workspace.getConfiguration('smartssh-smba');
+    const workspaceConfig = config.inspect('config').workspaceValue || {
+      showHostsInPickLists: false,
+      serverList: [],
+      customCommands: [],
+    };
+
+    // 提示用户
+    const result = await vscode.window.showInformationMessage(
+      '此操作将在当前工作区中创建命令配置。继续?',
+      { modal: true },
+      '创建'
+    );
+
+    if (result === '创建') {
+      // 打开设置
+      await vscode.commands.executeCommand(
+        'workbench.action.openWorkspaceSettings',
+        'smartssh-smba.config'
+      );
+    }
+  } catch (error) {
+    logger.error(`创建工作区设置失败: ${error.message}`);
+    vscode.window.showErrorMessage(`创建工作区设置失败: ${error.message}`);
   }
 }
 
@@ -708,119 +557,53 @@ function toggleLogging() {
 }
 
 /**
- * 创建工作区设置
- */
-async function createWorkspaceSettings() {
-  try {
-    // 检查当前是否有活动的工作区
-    if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
-      vscode.window.showWarningMessage('请先打开一个工作区文件夹');
-      return;
-    }
-
-    // 获取当前工作区配置
-    const config = vscode.workspace.getConfiguration('smartssh-smba');
-    const workspaceConfig = config.inspect('config').workspaceValue || {
-      showHostsInPickLists: false,
-      serverList: [],
-      customCommands: [],
-    };
-
-    // 提示用户
-    const result = await vscode.window.showInformationMessage(
-      '此操作将在当前工作区中创建命令配置。继续?',
-      { modal: true },
-      '创建'
-    );
-
-    if (result === '创建') {
-      // 打开设置
-      await vscode.commands.executeCommand(
-        'workbench.action.openWorkspaceSettings',
-        'smartssh-smba.config'
-      );
-    }
-  } catch (error) {
-    logger.error(`创建工作区设置失败: ${error.message}`);
-    vscode.window.showErrorMessage(`创建工作区设置失败: ${error.message}`);
-  }
-}
-
-/**
  * 注册命令管理命令
  * @param {vscode.ExtensionContext} context - 扩展上下文
  * @param {CommandTreeProvider} treeProvider - 命令树提供者实例
+ * @param {ServerTreeProvider} [serverTreeProvider] - 服务器树提供者实例，可选
  */
-function register(context, treeProvider) {
-  // 保存命令树提供者实例
+function register(context, treeProvider, serverTreeProvider) {
+  // 保存树提供者实例
   commandTreeProvider = treeProvider;
 
-  // 添加全局命令
-  context.subscriptions.push(
-    vscode.commands.registerCommand('smartssh-smba.addGlobalCommand', addGlobalCommand)
-  );
+  // 服务器相关命令，只在有serverTreeProvider时注册
+  if (serverTreeProvider) {
+    context.subscriptions.push(
+      vscode.commands.registerCommand('smartssh-smba.addServer', addServer),
+      vscode.commands.registerCommand('smartssh-smba.editServer', editServer),
+      vscode.commands.registerCommand('smartssh-smba.deleteServer', deleteServer),
+      vscode.commands.registerCommand('smartssh-smba.refreshServerList', refreshServerList),
+      vscode.commands.registerCommand('smartssh-smba.connectToServer', connectToServer),
+      vscode.commands.registerCommand('smartssh-smba.fastOpenConnection', fastOpenConnection)
+    );
+  }
 
-  // 添加工作区命令
+  // 命令管理相关命令
   context.subscriptions.push(
-    vscode.commands.registerCommand('smartssh-smba.addWorkspaceCommand', addWorkspaceCommand)
-  );
-
-  // 编辑命令
-  context.subscriptions.push(
-    vscode.commands.registerCommand('smartssh-smba.editCommand', editCommand)
-  );
-
-  // 删除命令
-  context.subscriptions.push(
-    vscode.commands.registerCommand('smartssh-smba.deleteCommand', deleteCommand)
-  );
-
-  // 发送命令
-  context.subscriptions.push(
-    vscode.commands.registerCommand('smartssh-smba.sendCommand', sendCommand)
-  );
-
-  // 刷新命令列表
-  context.subscriptions.push(
+    vscode.commands.registerCommand('smartssh-smba.addGlobalCommand', addGlobalCommand),
+    vscode.commands.registerCommand('smartssh-smba.addWorkspaceCommand', addWorkspaceCommand),
+    vscode.commands.registerCommand('smartssh-smba.editCommand', editCommand),
+    vscode.commands.registerCommand('smartssh-smba.deleteCommand', deleteCommand),
+    vscode.commands.registerCommand('smartssh-smba.sendCommand', sendCommand),
     vscode.commands.registerCommand('smartssh-smba.refreshCommandList', refreshCommandList)
   );
 
-  // 打开设置
+  // 设置相关命令
   context.subscriptions.push(
-    vscode.commands.registerCommand('smartssh-smba.openSettings', openSettings)
-  );
-
-  // 打开工作区命令设置
-  context.subscriptions.push(
-    vscode.commands.registerCommand('smartssh-smba.openWorkspaceCommandsSettings', openWorkspaceCommandsSettings)
-  );
-
-  // 创建本地命令
-  context.subscriptions.push(
-    vscode.commands.registerCommand('smartssh-smba.createLocalCommands', createLocalCommands)
-  );
-
-  // 删除本地命令
-  context.subscriptions.push(
+    vscode.commands.registerCommand('smartssh-smba.openSettings', openSettings),
+    vscode.commands.registerCommand('smartssh-smba.openWorkspaceCommandsSettings', openWorkspaceCommandsSettings),
+    vscode.commands.registerCommand('smartssh-smba.createLocalCommands', createLocalCommands),
     vscode.commands.registerCommand('smartssh-smba.deleteLocalCommand', deleteLocalCommand)
   );
 
-  // 设置日志级别
+  // 日志相关命令
   context.subscriptions.push(
-    vscode.commands.registerCommand('smartssh-smba.setLogLevel', setLogLevel)
-  );
-
-  // 设置日志目标
-  context.subscriptions.push(
-    vscode.commands.registerCommand('smartssh-smba.setLogTarget', setLogTarget)
-  );
-
-  // 切换日志状态
-  context.subscriptions.push(
+    vscode.commands.registerCommand('smartssh-smba.setLogLevel', setLogLevel),
+    vscode.commands.registerCommand('smartssh-smba.setLogTarget', setLogTarget),
     vscode.commands.registerCommand('smartssh-smba.toggleLogging', toggleLogging)
   );
 
-  // 创建工作区设置
+  // 工作区相关命令
   context.subscriptions.push(
     vscode.commands.registerCommand('smartssh-smba.createWorkspaceSettings', createWorkspaceSettings)
   );

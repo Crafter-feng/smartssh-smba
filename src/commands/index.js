@@ -17,7 +17,7 @@ function registerAll(context, providers = {}) {
   serverCommands.register(context, providers.serverTreeProvider);
 
   // 注册命令管理命令
-  commandCommands.register(context, providers.commandTreeProvider);
+  commandCommands.register(context, providers.commandTreeProvider, providers.serverTreeProvider);
 }
 
 module.exports = {

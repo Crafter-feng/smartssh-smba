@@ -255,36 +255,6 @@ async function fastOpenConnection() {
 function register(context, treeProvider) {
   // 保存服务器树提供者实例
   serverTreeProvider = treeProvider;
-
-  // 添加服务器
-  context.subscriptions.push(
-    vscode.commands.registerCommand('smartssh-smba.addServer', addServer)
-  );
-
-  // 编辑服务器
-  context.subscriptions.push(
-    vscode.commands.registerCommand('smartssh-smba.editServer', editServer)
-  );
-
-  // 删除服务器
-  context.subscriptions.push(
-    vscode.commands.registerCommand('smartssh-smba.deleteServer', deleteServer)
-  );
-
-  // 刷新服务器列表
-  context.subscriptions.push(
-    vscode.commands.registerCommand('smartssh-smba.refreshServerList', refreshServerList)
-  );
-
-  // 连接到服务器
-  context.subscriptions.push(
-    vscode.commands.registerCommand('smartssh-smba.connectToServer', connectToServer)
-  );
-
-  // 快速打开SSH连接
-  context.subscriptions.push(
-    vscode.commands.registerCommand('smartssh-smba.fastOpenConnection', fastOpenConnection)
-  );
 }
 
 module.exports = {
@@ -296,5 +266,3 @@ module.exports = {
   fastOpenConnection,
   register,
 };
-
-
