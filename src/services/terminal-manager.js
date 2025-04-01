@@ -405,10 +405,6 @@ class TerminalManager {
         args.push(server.privateKey);
         authMethod = 'byKey';
         logger.debug(`使用密钥认证: ${server.privateKey}`);
-      } else if (server.agent) {
-        args.push('-A');
-        authMethod = 'byAgent';
-        logger.debug('使用SSH代理认证');
       } else {
         // 默认使用密码或系统配置的密钥
         authMethod = 'byPassword';
