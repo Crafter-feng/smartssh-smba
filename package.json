@@ -443,7 +443,7 @@
     "@types/mocha": "^10.0.10",
     "@types/node": "^22.13.10",
     "@types/vscode": "^1.10.0",
-    "eslint-config-final": "^1.5.9",
+    "eslint-config-final": "^1.5.12",
     "jest": "^29.7.0",
     "mocha": "^11.1.0",
     "semantic-release-vsce": "^6.0.6",
